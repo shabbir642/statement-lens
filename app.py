@@ -172,14 +172,25 @@ def _self_check():
     import extractor, reporter, digest, analysis, categorise, lens  # noqa: F401
     assert hasattr(extractor, "extract_pdf")
     assert hasattr(reporter, "build_report")
-    # offline_guard must already have neutralised the network.
+    # offline_guard must block outbound internet while allowing loopback
+    # (the webview needs a local socket to grab a free port).
     import socket
+    s = socket.socket()  # creating a socket is fine now
     try:
-        socket.socket()
-    except offline_guard.OfflineViolation:
-        pass
-    else:
-        raise AssertionError("offline_guard did not block socket.socket")
+        try:
+            s.connect(("example.com", 80))  # reaching out must be refused
+        except offline_guard.OfflineViolation:
+            pass
+        else:
+            raise AssertionError("offline_guard did not block a remote connect")
+        try:
+            socket.getaddrinfo("example.com", 80)  # remote DNS must be refused
+        except offline_guard.OfflineViolation:
+            pass
+        else:
+            raise AssertionError("offline_guard did not block a remote DNS lookup")
+    finally:
+        s.close()
     print("self-check OK")
 
 
