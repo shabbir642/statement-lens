@@ -105,31 +105,40 @@ def cmd_dump(args):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--password", help="password for locked statement PDFs")
+    # A shared parent so --password is accepted both before AND after the
+    # subcommand (argparse otherwise only allows top-level options up front).
+    common = argparse.ArgumentParser(add_help=False)
+    # SUPPRESS so the subparser copy does not clobber a value the top-level
+    # parser already captured when --password is given before the subcommand.
+    common.add_argument("--password", default=argparse.SUPPRESS,
+                        help="password for locked statement PDFs")
+
+    p = argparse.ArgumentParser(
+        description=__doc__, parents=[common],
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    e = sub.add_parser("extract", help="PDFs -> transactions.csv")
+    e = sub.add_parser("extract", parents=[common],
+                       help="PDFs -> transactions.csv")
     e.add_argument("pdfs", nargs="+")
     e.add_argument("--out", default="transactions.csv")
     e.set_defaults(func=lambda a: cmd_extract(a))
 
-    r = sub.add_parser("report", help="CSV -> report.html")
+    r = sub.add_parser("report", parents=[common], help="CSV -> report.html")
     r.add_argument("--csv", default="transactions.csv")
     r.add_argument("--out", default="report.html")
     r.add_argument("--summary", action="store_true",
                    help="also write anonymised digest.md")
     r.set_defaults(func=lambda a: cmd_report(a))
 
-    run = sub.add_parser("run", help="extract then report")
+    run = sub.add_parser("run", parents=[common], help="extract then report")
     run.add_argument("pdfs", nargs="+")
     run.add_argument("--out", default="report.html")
     run.add_argument("--csv", default="transactions.csv")
     run.add_argument("--summary", action="store_true")
     run.set_defaults(func=cmd_run)
 
-    d = sub.add_parser("dump", help="print raw PDF text")
+    d = sub.add_parser("dump", parents=[common], help="print raw PDF text")
     d.add_argument("pdf")
     d.set_defaults(func=cmd_dump)
     return p
@@ -137,6 +146,8 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if not hasattr(args, "password"):
+        args.password = None
     args.func(args)
 
 
