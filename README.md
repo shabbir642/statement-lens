@@ -7,9 +7,11 @@ can verify by hand.
 
 ## Guarantees
 
-- **Offline, enforced not promised.** Before any work, `offline_guard` replaces
-  `socket.socket`, `socket.create_connection` and `socket.getaddrinfo` with
-  functions that raise. If a dependency ever phones home, the tool crashes.
+- **Offline, enforced not promised.** Before any work, `offline_guard` confines
+  networking to loopback: any `connect`, `create_connection` or DNS lookup for a
+  non-loopback address raises. If a dependency ever tries to phone home, the tool
+  crashes. (Local `127.0.0.1` sockets are allowed only so the desktop app's
+  webview can grab a free port — nothing can leave the machine.)
 - **Self-contained report.** `report.html` has zero external references — no
   CDN, no web fonts, no analytics. Verify: `grep http report.html` → nothing.
 - **Reconciliation.** If the statement has a balance column, the sum of every
