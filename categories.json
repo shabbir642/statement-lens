@@ -1,15 +1,17 @@
 {
   "Income": [
     "salary",
-    "neft",
-    "imps",
+    "neft cr",
+    "imps cr",
     "int.pd",
     "interest",
     "int credit",
+    "interest credit",
     "dividend",
     "refund",
     "cashback",
-    "reversal"
+    "reversal",
+    "credited by"
   ],
   "Food Delivery": [
     "swiggy",
@@ -133,35 +135,62 @@
     "hdfc loan",
     "credit card",
     "cc payment",
-    "cred "
-  ],
-  "Transfers Out": [
-    "upi",
-    "neft dr",
-    "imps dr",
-    "rtgs",
-    "transfer to",
-    "sent to",
-    "paytm",
-    "phonepe",
-    "gpay",
-    "google pay"
+    "cred.club"
   ],
   "Cash Withdrawal": [
     "atm",
     "cash wdl",
     "cash withdrawal",
     "nwd",
-    "eaw"
+    "eaw",
+    "atw",
+    "cwdr"
   ],
   "Fees & Charges": [
-    "charge",
-    "fee",
-    "gst",
+    "service charge",
     "sms alert",
-    "annual",
+    "annual fee",
     "penalty",
     "amc",
-    "processing"
+    "processing fee",
+    "gst",
+    "cgst",
+    "sgst",
+    "igst"
+  ],
+  "UPI Merchant/QR": [
+    "bharatpe",
+    "paytmqr",
+    "paytm.q",
+    "razorpay",
+    "cashfree",
+    "payu",
+    "billdesk",
+    "ccavenue",
+    "pinelabs",
+    "phonepe.qr",
+    "@rzp",
+    "okbizaxis"
+  ],
+  "Transfers Out": [
+    "neft dr",
+    "imps dr",
+    "rtgs",
+    "transfer to",
+    "sent to",
+    "self",
+    "own account"
+  ],
+  "UPI Payment": [
+    "upi/dr",
+    "upi-dr",
+    "upi/p2m",
+    "upi",
+    "vpa"
+  ],
+  "UPI Received": [
+    "upi/cr",
+    "upi-cr",
+    "upi"
   ]
 }

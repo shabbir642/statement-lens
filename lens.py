@@ -98,10 +98,19 @@ def cmd_run(args):
 
 def cmd_dump(args):
     import pdfplumber
+    redact = not args.no_redact
+    if redact:
+        from redact import redact_text
     with pdfplumber.open(args.pdf, password=args.password or "") as pdf:
         for i, page in enumerate(pdf.pages, 1):
             print(f"\n----- page {i} -----")
-            print(page.extract_text() or "(no text on this page)")
+            text = page.extract_text() or "(no text on this page)"
+            if redact:
+                text, _ = redact_text(text)
+            print(text)
+    if redact:
+        print("\n[identity fields redacted; pass --no-redact for the raw text "
+              "on your own machine]")
 
 
 def build_parser():
@@ -140,6 +149,8 @@ def build_parser():
 
     d = sub.add_parser("dump", parents=[common], help="print raw PDF text")
     d.add_argument("pdf")
+    d.add_argument("--no-redact", action="store_true",
+                   help="show raw text incl. name/address/account (local only)")
     d.set_defaults(func=cmd_dump)
     return p
 

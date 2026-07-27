@@ -54,6 +54,34 @@ _DEBIT_WORDS = re.compile(
 _CREDIT_WORDS = re.compile(
     r"\b(deposit|credit|salary|interest|refund|reversal|received|cr)\b", re.I)
 
+# A transaction-table header row (column titles).  Different banks word it
+# differently, so we look for a "date" column title next to a "balance" one,
+# with a debit/credit/withdrawal/deposit column somewhere between.  Seeing one
+# starts a new section: a fresh account or the same table continued on a new
+# page.  It also means the running balance must not be carried across it blindly.
+_SECTION_HDR = re.compile(
+    r"\bdate\b.*\b(balance|bal)\b", re.I)
+_SECTION_HDR_COLS = re.compile(
+    r"\b(withdrawal|deposit|debit|credit|dr|cr|amount|chq|ref)\b", re.I)
+
+# Lines that state a balance rather than a transaction — they carry a date and
+# a number and would otherwise be ingested as a bogus row.
+_SKIP_LINE = re.compile(
+    r"(opening|closing|available|current|ledger|effective)\s+balance|"
+    r"balance\s+(b/?f|c/?f|brought|carried)|"
+    r"multi[- ]?option\s+deposit|total\b.*\binr|statement\s+summary|"
+    r"customer\s+care|please\s+do\s+not\s+share|www\.|\.co\.in|page\s+\d+\s+of|"
+    # SBI writes empty summary fields as the literal token "null"; such lines
+    # (e.g. a garbled "Opening Balance on … : 7501.87 null null null null") are
+    # account summaries, never transactions.  No real narration contains "null".
+    r"\bnull\b",
+    re.I)
+
+# SBI-style "Your Closing Balance on 30-06-26: 868.87" (per-account closing).
+_CLOSING_LABEL = re.compile(
+    r"closing\s+balance[^0-9]*?[:\-]?\s*(\d[\d,]*\.\d{1,2}|\d{1,3}(?:,\d{2,3})+)",
+    re.I)
+
 
 def _to_float(token):
     return float(token.replace(",", ""))
@@ -111,9 +139,9 @@ def _clean_description(text):
 
 class Row:
     __slots__ = ("date", "description", "numbers", "balance",
-                 "marker", "amount", "signed", "confidence")
+                 "marker", "amount", "signed", "confidence", "new_section")
 
-    def __init__(self, date, description, numbers, marker):
+    def __init__(self, date, description, numbers, marker, new_section=False):
         self.date = date
         self.description = description
         self.numbers = numbers          # all money numbers on the row
@@ -122,27 +150,76 @@ class Row:
         self.amount = None              # chosen transaction amount (magnitude)
         self.signed = None              # signed amount
         self.confidence = None
+        self.new_section = new_section  # first row of a table section/account
+
+
+def _is_section_header(line):
+    return bool(_SECTION_HDR.search(line) and _SECTION_HDR_COLS.search(line)
+                and not _find_amounts(line))
+
+
+def _looks_like_description(line):
+    """A wrapped narration line: has letters, isn't noise, carries no amount."""
+    if not re.search(r"[A-Za-z]", line):
+        return False
+    if _SKIP_LINE.search(line) or _is_section_header(line):
+        return False
+    return True
 
 
 def _candidate_rows(lines):
-    """Turn text lines into candidate transaction rows (date + >=1 amount)."""
+    """Turn text lines into transaction rows, handling two real-world messes:
+
+    * **Wrapped rows.** When a narration is long, the description lands on its
+      own line and the ``date ... amounts balance`` lands on the next.  We keep
+      a rolling description buffer and, when a dated row has no usable narration
+      of its own, adopt the buffered line(s).
+    * **Sections.** A column-header row (or a balance-label line) marks a break
+      between accounts / pages.  The next real row is flagged ``new_section`` so
+      the running balance is not carried across the seam.
+    """
     rows = []
-    for line in lines:
+    pending = []            # buffered wrapped-description lines
+    section_break = True    # the first row is always a section start
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if _is_section_header(line):
+            section_break = True
+            pending = []
+            continue
+        if _SKIP_LINE.search(line):
+            pending = []
+            continue
+
         iso, remainder = _strip_dates(line)
-        if not iso:
-            continue
         amounts = _find_amounts(remainder)
-        if not amounts:
+
+        if not iso or not amounts:
+            # Not a dated money row: treat as a possible wrapped description.
+            if _looks_like_description(line):
+                pending.append(_clean_description(line))
             continue
+
         marker_m = _DRCR.search(remainder)
         marker = marker_m.group(1).upper() if marker_m else None
-        # Description is the remainder with amounts and the marker removed.
         desc = remainder
         for _, (a, b) in reversed(amounts):
             desc = desc[:a] + " " + desc[b:]
-        desc = _DRCR.sub(" ", desc)
-        rows.append(Row(iso, _clean_description(desc),
-                        [v for v, _ in amounts], marker))
+        desc = _clean_description(_DRCR.sub(" ", desc))
+
+        # If this row carries no narration of its own, adopt the wrapped lines.
+        if not re.search(r"[A-Za-z]", desc) and pending:
+            desc = _clean_description(" ".join(pending))
+        elif pending and len(desc) < 4:
+            desc = _clean_description(" ".join(pending) + " " + desc)
+        pending = []
+
+        rows.append(Row(iso, desc, [v for v, _ in amounts], marker,
+                        new_section=section_break))
+        section_break = False
     return rows
 
 
@@ -180,6 +257,20 @@ def _closest(value, candidates):
     return min(candidates, key=lambda c: abs(abs(c) - value))
 
 
+def _continues(prev_balance, r, tol=0.02):
+    """True if r's balance flows from prev_balance by one of r's own amounts.
+
+    Used to tell a repeated page header (balance continues — same account) from
+    a real account change (balance jumps), so we only reset the running balance
+    at genuine breaks.
+    """
+    if prev_balance is None or r.balance is None:
+        return False
+    others = r.numbers[:-1]
+    delta = r.balance - prev_balance
+    return bool(others and _matches_any(abs(delta), others, tol))
+
+
 def find_opening_balance(full_text):
     m = _OPENING.search(full_text)
     return _to_float(m.group(2)) if m else None
@@ -190,10 +281,23 @@ def find_closing_balance(full_text):
     return _to_float(m.group(2)) if m else None
 
 
-def _assign_from_balance(rows, opening):
-    """Set signed amounts using the running balance, validating each row."""
-    prev_balance = opening
-    for r in rows:
+def _assign_from_balance(rows, opening=None):
+    """Set signed amounts using the running balance, validating each row.
+
+    The balance is not carried across a section break (a new account, where the
+    balance jumps): at each ``new_section`` row the running balance resets, so
+    that row falls back to its Dr/Cr marker rather than trusting a bogus delta.
+    Only the very first section is seeded with a detected opening balance.
+    """
+    prev_balance = None
+    for i, r in enumerate(rows):
+        if r.new_section:
+            if i == 0:
+                prev_balance = opening
+            elif not _continues(prev_balance, r):
+                # Genuine break (account change): reset. A repeated page header
+                # where the balance still flows is left alone.
+                prev_balance = None
         others = r.numbers[:-1]
         if prev_balance is not None and r.balance is not None:
             delta = r.balance - prev_balance
@@ -211,7 +315,7 @@ def _assign_from_balance(rows, opening):
                 r.confidence = "medium"
                 prev_balance = r.balance
                 continue
-        # No usable balance yet (first row without opening) — fall back.
+        # No usable prior balance (first row of a section) — fall back.
         _assign_from_marker_or_words(r, others or r.numbers)
         if r.balance is not None:
             prev_balance = r.balance
@@ -236,25 +340,59 @@ def _assign_from_marker_or_words(r, candidates):
         r.confidence = "low"
 
 
-def reconcile(rows, opening, closing):
-    """Compare sum of signed amounts against the balance column's movement.
+def reconcile(rows, opening=None, closing=None):
+    """Check that the balance column and the amounts tell the same story.
 
-    Returns (ok, message, movement, parsed_sum, gap) — movement/parsed_sum are
-    None when there is no balance column to check against.
+    For each row that follows another within the same section, the balance
+    should move by exactly that row's amount.  Two *independent* measurements —
+    the printed balance delta and the printed Credit/Debit figure — are compared
+    per row.  If a row was dropped or duplicated, its neighbour's delta no longer
+    matches its amount, so the mismatch is caught.  This needs no opening-balance
+    label and works across pages and multiple accounts.
+
+    Returns (ok, message, movement, parsed_sum, gap).
     """
-    balances = [r.balance for r in rows if r.balance is not None]
-    if not balances or opening is None:
+    checked = matched = 0
+    prev = None
+    movement = parsed = 0.0
+    first_gap = None
+    for r in rows:
+        b = r.balance
+        if prev is None or b is None:
+            if b is not None:
+                prev = b
+            continue
+        # A real section break (balance jumps) is not a checkable step; a page
+        # header where the balance still flows is checked like any other row.
+        if r.new_section and not _continues(prev, r):
+            prev = b
+            continue
+        delta = b - prev
+        movement += delta
+        if r.signed is not None:
+            parsed += r.signed
+        amt = r.amount
+        if amt is not None and abs(abs(delta) - abs(amt)) <= max(0.01, 0.02 * abs(amt)):
+            matched += 1
+        elif first_gap is None:
+            first_gap = (r.date, (r.description or "")[:30])
+        checked += 1
+        prev = b
+
+    if checked == 0:
         return None, ("no balance column detected — reconciliation skipped, "
                       "review the CSV by hand"), None, None, None
-    last_balance = closing if closing is not None else balances[-1]
-    movement = last_balance - opening
-    parsed_sum = sum(r.signed for r in rows if r.signed is not None)
-    gap = parsed_sum - movement
-    if abs(gap) <= 0.01:
-        return True, (f"reconciled against the balance column exactly "
-                      f"(Rs {abs(movement):,.2f} movement)"), movement, parsed_sum, gap
-    return False, (f"! does NOT reconcile: gap Rs {gap:,.2f} — "
-                   f"rows are missing or duplicated"), movement, parsed_sum, gap
+
+    gap = parsed - movement
+    mismatches = checked - matched
+    if mismatches == 0:
+        return True, (f"reconciled against the balance column: all {checked} "
+                      f"balance steps match their amounts "
+                      f"(Rs {abs(movement):,.2f} moved)"), movement, parsed, gap
+    msg = (f"! does NOT reconcile: {mismatches} of {checked} balance steps "
+           f"don't match their amounts — rows missing or duplicated "
+           f"(first near {first_gap[0]} '{first_gap[1]}')")
+    return False, msg, movement, parsed, gap
 
 
 # --- public API --------------------------------------------------------------
@@ -282,22 +420,13 @@ def extract_pdf(pdf_path, password=None):
     rows = _candidate_rows(lines)
     opening = find_opening_balance(full_text)
     closing = find_closing_balance(full_text)
+    if closing is None:
+        m = _CLOSING_LABEL.search(full_text)
+        if m:
+            closing = _to_float(m.group(1))
 
     if _has_balance_column(rows):
-        # If we could not detect an opening balance from the header, seed it
-        # from the first row so later deltas still work; reconciliation then
-        # measures movement from that same first balance (still catches drops
-        # in rows 2..n).
-        seed = opening
-        if seed is None and rows and rows[0].balance is not None:
-            first = rows[0]
-            others = first.numbers[:-1]
-            _assign_from_marker_or_words(first, others)
-            seed = first.balance - (first.signed or 0.0)
-            opening = seed
-            _assign_from_balance(rows[1:], first.balance)
-        else:
-            _assign_from_balance(rows, seed)
+        _assign_from_balance(rows, opening)
     else:
         for r in rows:
             _assign_from_marker_or_words(r, r.numbers[:-1] if len(r.numbers) > 1

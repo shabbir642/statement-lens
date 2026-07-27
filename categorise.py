@@ -27,15 +27,25 @@ OUTFLOW_ONLY = {
     "Fees & Charges",
     "EMI & Loans",
     "Rent",
+    "UPI Merchant/QR",
+    "UPI Payment",
 }
 
 # The single inflow category.  Checked first for credits, never for debits.
 INCOME_CATEGORY = "Income"
 
 # Written verbatim to categories.json on first run.  Lowercase substrings.
+#
+# Order matters: the FIRST matching category wins (Income is always tried first
+# for credits).  So specific rules — brands, QR-merchant markers — come before
+# the broad "UPI Payment" / "UPI Received" catch-alls at the very end, which
+# sweep up whatever UPI traffic no specific rule claimed.  On UPI-heavy Indian
+# accounts most debits are payments, not "transfers", so bare "upi" must NOT
+# live under Transfers Out (that silently mislabels everyday spending).
 DEFAULT_CATEGORIES = {
-    "Income": ["salary", "neft", "imps", "int.pd", "interest", "int credit",
-               "dividend", "refund", "cashback", "reversal"],
+    "Income": ["salary", "neft cr", "imps cr", "int.pd", "interest",
+               "int credit", "interest credit", "dividend", "refund",
+               "cashback", "reversal", "credited by"],
     "Food Delivery": ["swiggy", "zomato", "eatclub", "faasos", "box8"],
     "Groceries": ["blinkit", "zepto", "bigbasket", "big basket", "dmart",
                   "d mart", "grofers", "instamart", "jiomart", "reliance fresh"],
@@ -58,12 +68,21 @@ DEFAULT_CATEGORIES = {
     "Shopping": ["amazon", "flipkart", "myntra", "ajio", "nykaa", "meesho",
                  "tata cliq", "croma", "reliance digital", "decathlon"],
     "EMI & Loans": ["emi", "loan", "bajaj finance", "hdfc loan", "credit card",
-                    "cc payment", "cred "],
-    "Transfers Out": ["upi", "neft dr", "imps dr", "rtgs", "transfer to",
-                      "sent to", "paytm", "phonepe", "gpay", "google pay"],
-    "Cash Withdrawal": ["atm", "cash wdl", "cash withdrawal", "nwd", "eaw"],
-    "Fees & Charges": ["charge", "fee", "gst", "sms alert", "annual",
-                       "penalty", "amc", "processing"],
+                    "cc payment", "cred.club"],
+    "Cash Withdrawal": ["atm", "cash wdl", "cash withdrawal", "nwd", "eaw",
+                        "atw", "cwdr"],
+    "Fees & Charges": ["service charge", "sms alert", "annual fee", "penalty",
+                       "amc", "processing fee", "gst", "cgst", "sgst", "igst"],
+    # QR / aggregator merchant payments — money spent at a shop, not a transfer.
+    "UPI Merchant/QR": ["bharatpe", "paytmqr", "paytm.q", "razorpay", "cashfree",
+                        "payu", "billdesk", "ccavenue", "pinelabs", "phonepe.qr",
+                        "@rzp", "okbizaxis"],
+    # Explicit bank transfers (NEFT/RTGS/IMPS out, named transfers).
+    "Transfers Out": ["neft dr", "imps dr", "rtgs", "transfer to", "sent to",
+                      "self", "own account"],
+    # Catch-alls, tried last: leftover UPI traffic no specific rule claimed.
+    "UPI Payment": ["upi/dr", "upi-dr", "upi/p2m", "upi", "vpa"],
+    "UPI Received": ["upi/cr", "upi-cr", "upi"],
 }
 
 
