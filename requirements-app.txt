@@ -1,0 +1,15 @@
+# Desktop-app + packaging dependencies (the CLI itself needs only pdfplumber).
+#
+#   pip install -r requirements-app.txt
+#
+# pywebview drives a native OS webview (WebView2 on Windows, WKWebView on
+# macOS) — no bundled browser, no local server, so offline_guard stays intact.
+pdfplumber>=0.11
+pywebview>=5.0
+
+# Windows only: the .NET bridge pywebview uses for the WebView2 backend.
+# (No-op / not installed on macOS, where the Cocoa backend is used instead.)
+pythonnet>=3.0 ; sys_platform == "win32"
+
+# Build-time only — produces StatementLens.exe. Not needed at runtime.
+pyinstaller>=6.0
