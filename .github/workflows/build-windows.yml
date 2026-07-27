@@ -8,6 +8,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write   # needed to attach the installer to a GitHub Release
+
 jobs:
   build:
     runs-on: windows-latest
@@ -50,3 +53,13 @@ jobs:
             dist/StatementLens.exe
             installer/Output/StatementLens-Setup.exe
           if-no-files-found: error
+
+      # On a version tag, publish a Release so the installer has a stable public
+      # link to send to users:
+      #   https://github.com/<owner>/statement-lens/releases/latest/download/StatementLens-Setup.exe
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/StatementLens-Setup.exe
+          generate_release_notes: true
