@@ -88,6 +88,12 @@ that salary is Income, that the CREDIT/date traps are handled, that the report
 has zero `http` references, and (headless) that it renders with no console
 errors and every section populated.
 
+## How it works
+
+See [FLOW.md](FLOW.md) for the code-flow diagrams — entry points, the two
+pipelines (extract and report), the parsing/reconciliation helpers, and the
+outputs. Known limitations are in [GAPS.md](GAPS.md).
+
 ## Repo hygiene
 
 `.gitignore` excludes `statements/`, `*.pdf`, `transactions.csv`, `report.html`,
