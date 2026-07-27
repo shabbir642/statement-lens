@@ -113,6 +113,101 @@ def detect_recurring(txns, min_occurrences=3):
     return out
 
 
+def spending_insights(txns):
+    """Second-order patterns the raw totals don't show.
+
+    All derived from amounts, dates and descriptions in the CSV — no balance
+    column needed (see balance_health for that).  Returns a plain dict so the
+    digest and report can present the same numbers.
+    """
+    import datetime
+    debits = [t for t in txns if t["amount"] < 0]
+    credits = [t for t in txns if t["amount"] > 0]
+    outs = sorted((abs(t["amount"]) for t in debits), reverse=True)
+    gross_out = sum(outs)
+    gross_in = sum(t["amount"] for t in credits)
+
+    # Concentration (Pareto): what share of outflow the biggest few debits are.
+    pareto = {}
+    for k in (3, 5, 10):
+        if outs:
+            pareto[k] = round(sum(outs[:k]) / gross_out * 100) if gross_out else 0
+
+    # Counterparty concentration.
+    payees = {}
+    for t in debits:
+        payees.setdefault(t["merchant"], []).append(abs(t["amount"]))
+    distinct = len(payees)
+    repeat = sum(1 for v in payees.values() if len(v) >= 2)
+    top_merchants = sorted(((m, sum(v), len(v)) for m, v in payees.items()),
+                           key=lambda x: -x[1])[:8]
+
+    # Weekday rhythm.
+    weekday = {d: [0, 0.0] for d in
+               ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+    byday = {}
+    for t in debits:
+        try:
+            wd = datetime.date.fromisoformat(t["date"]).strftime("%a")
+        except ValueError:
+            continue
+        weekday[wd][0] += 1
+        weekday[wd][1] += abs(t["amount"])
+        byday[t["date"]] = byday.get(t["date"], 0.0) + abs(t["amount"])
+    biggest_day = max(byday.items(), key=lambda x: x[1]) if byday else (None, 0)
+
+    # Round-number debits (often person-to-person / lending, not merchants).
+    round100 = [a for a in outs if a >= 100 and a % 100 == 0]
+    # Tiny pings = UPI mandate / autopay verification.
+    pings = sum(1 for t in txns if abs(t["amount"]) <= 2)
+
+    return {
+        "n_debits": len(debits), "n_credits": len(credits),
+        "gross_out": gross_out, "gross_in": gross_in,
+        "throughput": gross_in + gross_out,
+        "pareto": pareto,
+        "distinct_payees": distinct, "repeat_payees": repeat,
+        "top_merchants": top_merchants,
+        "weekday": weekday, "biggest_day": biggest_day,
+        "round100_n": len(round100), "round100_total": sum(round100),
+        "autopay_pings": pings,
+    }
+
+
+def balance_health(rows):
+    """Cash-flow health from the running balance (extract-stage only).
+
+    ``rows`` are extractor Row objects with .balance; splits by account at a
+    genuine balance discontinuity and reports the low-water mark of each.
+    """
+    from extractor import _continues
+    accounts, cur, prev = [], [], None
+    for r in rows:
+        if r.new_section and prev is not None and not _continues(prev, r):
+            accounts.append(cur)
+            cur = []
+        cur.append(r)
+        if r.balance is not None:
+            prev = r.balance
+    if cur:
+        accounts.append(cur)
+
+    out = []
+    for a in accounts:
+        bals = [(r.date, r.balance) for r in a if r.balance is not None]
+        if not bals:
+            continue
+        low = min(bals, key=lambda x: x[1])
+        end = bals[-1][1]
+        ins = sum(r.signed for r in a if r.signed and r.signed > 0)
+        outs = sum(-r.signed for r in a if r.signed and r.signed < 0)
+        out.append({"txns": len(a), "low_date": low[0], "low_balance": low[1],
+                    "end_balance": end, "in": ins, "out": outs,
+                    "throughput": ins + outs,
+                    "churn": (ins + outs) / max(end, 1)})
+    return out
+
+
 def detect_outliers(txns, mad_k=4.0):
     """Flag transactions large relative to their OWN category (median + k*MAD).
 

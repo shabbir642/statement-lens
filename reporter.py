@@ -67,6 +67,18 @@ _TEMPLATE = r"""<!doctype html>
              letter-spacing:.08em; }
   .stat .v { font-size:22px; margin-top:6px; font-variant-numeric:tabular-nums; }
   .pos { color:var(--in); } .neg { color:var(--out); }
+  .chips { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr));
+           gap:10px; margin-bottom:12px; }
+  .chip { background:var(--panel2); border:1px solid var(--border);
+          border-radius:8px; padding:10px 12px; }
+  .chip .k { color:var(--muted); font-size:10px; text-transform:uppercase;
+             letter-spacing:.06em; }
+  .chip .v { font-size:16px; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .chip .s { color:var(--muted); font-size:10px; margin-top:2px; }
+  .wkbar { display:flex; gap:4px; align-items:flex-end; height:40px; margin-top:6px; }
+  .wkcol { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .wkcol .bar { width:100%; background:var(--out); border-radius:2px 2px 0 0; min-height:2px; }
+  .wkcol .lbl { font-size:9px; color:var(--muted); }
   .reconcile { padding:8px 12px; border-radius:6px; font-size:12px;
                border:1px solid var(--border); }
   .reconcile.ok { color:var(--in); border-color:#1f512b; background:#0f2413; }
@@ -135,6 +147,8 @@ _TEMPLATE = r"""<!doctype html>
   <div class="panel"><div class="stats" id="stats"></div></div>
   <div class="panel"><h2>Monthly flow &mdash; income above, spending below, net line</h2>
     <div id="flow"></div></div>
+  <div class="panel"><h2>Insights <span class="muted">(for the selected month range)</span></h2>
+    <div id="insights"></div></div>
   <div class="panel"><h2>Category breakdown <span class="muted">(click to filter everything below)</span></h2>
     <div id="cats"></div></div>
   <div class="panel"><h2>Category trends</h2><div id="sparks"></div></div>
@@ -226,6 +240,53 @@ function renderFlow(){
   months.forEach((m,i)=>{ s+=`<circle cx="${x(i)}" cy="${yNet(net[m])}" r="3" fill="var(--net)"><title>${m} net ${fmt(net[m])}</title></circle>`; });
   s+=`</svg>`;
   document.getElementById('flow').innerHTML = s;
+}
+
+// ---- insights (second-order patterns) -------------------------------------
+function renderInsights(){
+  const rows = monthFiltered();
+  const debits = rows.filter(t=>t.amount<0);
+  const credits = rows.filter(t=>t.amount>0);
+  const outs = debits.map(t=>Math.abs(t.amount)).sort((a,b)=>b-a);
+  const grossOut = outs.reduce((s,a)=>s+a,0);
+  const grossIn = credits.reduce((s,t)=>s+t.amount,0);
+  const pareto = k => grossOut ? Math.round(outs.slice(0,k).reduce((s,a)=>s+a,0)/grossOut*100) : 0;
+  // counterparties
+  const payee = {};
+  for(const t of debits){ (payee[t.merchant]=payee[t.merchant]||[]).push(Math.abs(t.amount)); }
+  const distinct = Object.keys(payee).length;
+  const repeat = Object.values(payee).filter(v=>v.length>=2).length;
+  const topMerch = Object.entries(payee).map(([m,v])=>[m,v.reduce((s,a)=>s+a,0),v.length])
+    .sort((a,b)=>b[1]-a[1]).slice(0,6);
+  // weekday
+  const wd = {Mon:0,Tue:0,Wed:0,Thu:0,Fri:0,Sat:0,Sun:0};
+  const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const byday = {};
+  for(const t of debits){ const d=new Date(t.date);
+    wd[names[d.getDay()]] += Math.abs(t.amount);
+    byday[t.date]=(byday[t.date]||0)+Math.abs(t.amount); }
+  const bigDay = Object.entries(byday).sort((a,b)=>b[1]-a[1])[0];
+  const round100 = outs.filter(a=>a>=100 && a%100===0);
+  const pings = rows.filter(t=>Math.abs(t.amount)<=2).length;
+  const wkMax = Math.max(1, ...Object.values(wd));
+  const order=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  const chips = [
+    ['Throughput', fmt(grossIn+grossOut), `in ${fmt(grossIn)} / out ${fmt(grossOut)}`],
+    ['Concentration', pareto(3)+'%', `top 3 debits of outflow · top 10 = ${pareto(10)}%`],
+    ['Counterparties', String(distinct), `${repeat} seen more than once`],
+    ['Biggest day', bigDay?fmt(bigDay[1]):'—', bigDay?bigDay[0]:''],
+    ['Round-number debits', String(round100.length), `${fmt(round100.reduce((s,a)=>s+a,0))} · often person-to-person`],
+    ['Autopay/verify pings', String(pings), '≤ Rs 2 · mandate checks'],
+  ];
+  let html = '<div class="chips">' + chips.map(([k,v,s])=>
+    `<div class="chip"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join('') + '</div>';
+  html += '<div class="chip" style="margin-bottom:12px"><div class="k">Spend by weekday</div><div class="wkbar">' +
+    order.map(d=>`<div class="wkcol"><div class="bar" style="height:${wd[d]/wkMax*32}px" title="${d} ${fmt(wd[d])}"></div><div class="lbl">${d[0]}</div></div>`).join('') + '</div></div>';
+  html += '<div class="k" style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin:4px 0">Top counterparties by outflow</div>';
+  html += topMerch.map(([m,tot,n])=>
+    `<div class="spark"><div class="name" style="flex:1">${esc(m)}</div><div class="amt">${fmt(tot)} <span class="muted">×${n}</span></div></div>`).join('');
+  document.getElementById('insights').innerHTML = html;
 }
 
 // ---- category breakdown (clickable) ---------------------------------------
@@ -392,7 +453,7 @@ function renderActiveFilter(){
 }
 
 function renderAll(){
-  renderStats(); renderFlow(); renderCats(); renderSparks();
+  renderStats(); renderFlow(); renderInsights(); renderCats(); renderSparks();
   renderRecurring(); renderOutliers(); renderUnrecognised();
   renderTable(); renderActiveFilter();
 }

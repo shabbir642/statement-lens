@@ -46,11 +46,28 @@ def cmd_extract(args, csv_path=None):
         print(f"parsed {len(rows)} rows; "
               f"opening={res['opening']}, closing={res['closing']}")
         print(rc["message"])
+        _print_balance_health(rows)
 
     _write_csv(all_rows, csv_path)
     print(f"\nwrote {len(all_rows)} rows -> {csv_path}")
     print("Review and fix this CSV, then run: report")
     return reconciles
+
+
+def _print_balance_health(rows):
+    """Console cash-flow summary per account (uses the balance column)."""
+    from analysis import balance_health
+    health = balance_health(rows)
+    if len(health) <= 0:
+        return
+    if len(health) > 1:
+        print(f"  {len(health)} accounts in this PDF:")
+    for i, h in enumerate(health, 1):
+        tag = f"  account {i}: " if len(health) > 1 else "  "
+        print(f"{tag}{h['txns']} txns, in +Rs {h['in']:,.0f} / out "
+              f"-Rs {h['out']:,.0f}; low Rs {h['low_balance']:,.2f} on "
+              f"{h['low_date']}, ended Rs {h['end_balance']:,.2f} "
+              f"(churn {h['churn']:.1f}x)")
 
 
 def _write_csv(rows, out_path):

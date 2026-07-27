@@ -6,7 +6,8 @@ only by category, cadence and amount — the shape of the spending, none of the
 identity.
 """
 
-from analysis import monthly_category_totals, detect_recurring
+from analysis import (monthly_category_totals, detect_recurring,
+                      spending_insights)
 
 
 def _fmt(n):
@@ -52,6 +53,33 @@ def write_digest(txns, path="digest.md"):
                 f"| {i} | {r['category']} | {r['cadence']} | "
                 f"{_fmt(r['median_amount'])} | {r['stability'] * 100:.0f}% | "
                 f"{_fmt(r['annualised'])} |")
+    lines.append("")
+
+    # --- second-order insights (all anonymised aggregates) ---
+    ins = spending_insights(txns)
+    lines.append("## Spending insights (anonymised)")
+    lines.append("")
+    lines.append(f"- **Throughput:** Rs {ins['throughput']:,.0f} moved "
+                 f"(in Rs {ins['gross_in']:,.0f} / out Rs {ins['gross_out']:,.0f}) "
+                 f"across {ins['n_debits']} debits and {ins['n_credits']} credits.")
+    if ins["pareto"]:
+        p = ins["pareto"]
+        lines.append(f"- **Concentration:** the top 3 debits are "
+                     f"{p.get(3, 0)}% of all outflow; top 10 are {p.get(10, 0)}%.")
+    lines.append(f"- **Counterparties:** {ins['distinct_payees']} distinct "
+                 f"payees, {ins['repeat_payees']} seen more than once "
+                 f"(a high distinct count = mostly one-off payments).")
+    if ins["biggest_day"][0]:
+        lines.append(f"- **Biggest single day:** Rs "
+                     f"{ins['biggest_day'][1]:,.0f}.")
+    lines.append(f"- **Round-number debits:** {ins['round100_n']} totalling "
+                 f"Rs {ins['round100_total']:,.0f} (often person-to-person).")
+    lines.append(f"- **Autopay/verify pings (<= Rs 2):** {ins['autopay_pings']} "
+                 f"— check what mandates are authorised.")
+    wk = ins["weekday"]
+    busiest = max(wk.items(), key=lambda x: x[1][1])
+    lines.append(f"- **Busiest weekday by spend:** {busiest[0]} "
+                 f"(Rs {busiest[1][1]:,.0f}).")
     lines.append("")
 
     with open(path, "w", encoding="utf-8") as fh:

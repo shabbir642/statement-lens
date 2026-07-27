@@ -27,8 +27,8 @@ def main(report_path):
             pg.on("pageerror", lambda e: result["errors"].append(str(e)))
             pg.goto(pathlib.Path(report_path).resolve().as_uri())
             pg.wait_for_timeout(500)
-            for sec in ["stats", "flow", "cats", "sparks", "recurring",
-                        "outliers", "unrecognised", "txntable"]:
+            for sec in ["stats", "flow", "insights", "cats", "sparks",
+                        "recurring", "outliers", "unrecognised", "txntable"]:
                 result["populated"][sec] = pg.eval_on_selector(
                     f"#{sec}", "el => el.innerHTML.trim().length") or 0
             b.close()
