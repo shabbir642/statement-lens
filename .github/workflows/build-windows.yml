@@ -1,0 +1,52 @@
+name: build-windows
+
+# Builds the Windows app + installer. This dev repo is on macOS, which cannot
+# cross-compile a Windows .exe, so the exe/installer are produced here on a
+# windows-latest runner. Triggers on a version tag or manually.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-app.txt
+
+      - name: Build StatementLens.exe (PyInstaller)
+        run: pyinstaller --noconfirm statement-lens.spec
+
+      - name: Smoke-test the exe imports offline guard + pipeline
+        # Fails the build if a module or data file was left out of the bundle.
+        run: dist\StatementLens.exe --self-check
+
+      - name: Fetch WebView2 bootstrapper for the installer
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" `
+            -OutFile "installer\MicrosoftEdgeWebview2Setup.exe"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (Inno Setup)
+        run: iscc installer\statement-lens.iss
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StatementLens-windows
+          path: |
+            dist/StatementLens.exe
+            installer/Output/StatementLens-Setup.exe
+          if-no-files-found: error

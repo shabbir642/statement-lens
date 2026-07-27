@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statement Lens</title>
+<style>
+  /* Self-contained — no external fonts, CSS, scripts or images.
+     Verify: grep -i http ui/upload.html  -> nothing. Matches report.html. */
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
+    --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff;
+    --in:#3fb950; --out:#f85149;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:var(--mono); font-size:13px; line-height:1.5;
+         min-height:100vh; display:flex; flex-direction:column; }
+  header { padding:16px 20px; border-bottom:1px solid var(--border); }
+  h1 { font-size:18px; margin:0; font-weight:600; letter-spacing:.02em; }
+  header .sub { color:var(--muted); font-size:11px; margin-top:4px; }
+  main { flex:1; display:flex; align-items:center; justify-content:center;
+         padding:24px; }
+  .card { width:100%; max-width:520px; }
+
+  /* drop zone */
+  .drop { border:2px dashed var(--border); border-radius:10px;
+          background:var(--panel); padding:36px 24px; text-align:center;
+          cursor:pointer; transition:border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color:var(--accent); background:var(--panel2); }
+  .drop .big { font-size:14px; }
+  .drop .hint { color:var(--muted); font-size:11px; margin-top:8px; }
+  .drop .file { color:var(--accent); margin-top:10px; word-break:break-all;
+                display:none; }
+  .drop.has-file .file { display:block; }
+  .drop.has-file .prompt { display:none; }
+
+  .row { margin-top:16px; }
+  label { display:block; color:var(--muted); font-size:11px;
+          text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+  input[type=password] { width:100%; background:var(--panel2); color:var(--fg);
+    border:1px solid var(--border); border-radius:6px; padding:9px 10px;
+    font-family:var(--mono); font-size:13px; }
+  input[type=password]:focus { outline:none; border-color:var(--accent); }
+  .field-hint { color:var(--muted); font-size:10px; margin-top:5px; }
+
+  button.go { margin-top:20px; width:100%; background:var(--accent);
+    color:#07121f; border:none; border-radius:6px; padding:11px;
+    font-family:var(--mono); font-size:13px; font-weight:600; cursor:pointer; }
+  button.go:disabled { background:var(--panel2); color:var(--muted);
+    cursor:not-allowed; }
+
+  /* progress + error */
+  .status { margin-top:20px; display:none; }
+  .status.show { display:block; }
+  .steps { list-style:none; padding:0; margin:0; }
+  .steps li { display:flex; align-items:center; gap:10px; padding:5px 0;
+              color:var(--muted); }
+  .steps li .dot { width:9px; height:9px; border-radius:50%;
+                   background:var(--border); flex:none; }
+  .steps li.active { color:var(--fg); }
+  .steps li.active .dot { background:var(--accent); }
+  .steps li.done { color:var(--in); }
+  .steps li.done .dot { background:var(--in); }
+  .msg { color:var(--muted); font-size:11px; margin-top:10px; min-height:14px; }
+  .error { display:none; margin-top:18px; padding:12px 14px; border-radius:6px;
+           border:1px solid #5a1d1a; background:#2a1210; color:var(--out);
+           font-size:12px; }
+  .error.show { display:block; }
+  footer { padding:12px 20px; border-top:1px solid var(--border);
+           color:var(--muted); font-size:10px; text-align:center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Statement Lens</h1>
+    <div class="sub">Drop a bank-statement PDF to see where the money goes. Runs entirely on this computer — offline.</div>
+  </header>
+
+  <main>
+    <div class="card">
+      <div id="drop" class="drop">
+        <div class="prompt">
+          <div class="big">Drop a statement PDF here</div>
+          <div class="hint">or click to choose a file</div>
+        </div>
+        <div class="file" id="fileName"></div>
+      </div>
+
+      <div class="row">
+        <label for="pw">PDF password <span style="text-transform:none">(if the bank locked it)</span></label>
+        <input id="pw" type="password" autocomplete="off" placeholder="Leave blank if not locked">
+        <div class="field-hint">Never leaves this computer. Used only to open the PDF.</div>
+      </div>
+
+      <button id="go" class="go" disabled>Analyze statement</button>
+
+      <div class="status" id="status">
+        <ul class="steps">
+          <li id="s-extracting"><span class="dot"></span>Reading the statement</li>
+          <li id="s-analysing"><span class="dot"></span>Categorising transactions</li>
+          <li id="s-rendering"><span class="dot"></span>Building your report</li>
+        </ul>
+        <div class="msg" id="msg"></div>
+      </div>
+
+      <div class="error" id="error"></div>
+    </div>
+  </main>
+
+  <footer>No internet. No accounts. Every number is plain arithmetic you can verify by hand.</footer>
+
+<script>
+  var chosenPath = "";
+  var STEPS = ["extracting", "analysing", "rendering"];
+
+  var drop = document.getElementById("drop");
+  var fileName = document.getElementById("fileName");
+  var pw = document.getElementById("pw");
+  var go = document.getElementById("go");
+  var statusBox = document.getElementById("status");
+  var errorBox = document.getElementById("error");
+  var msg = document.getElementById("msg");
+
+  function setFile(path) {
+    chosenPath = path || "";
+    if (chosenPath) {
+      // show just the file name, keep the full path in a tooltip
+      var name = chosenPath.split(/[\\/]/).pop();
+      fileName.textContent = name;
+      fileName.title = chosenPath;
+      drop.classList.add("has-file");
+      go.disabled = false;
+    } else {
+      drop.classList.remove("has-file");
+      go.disabled = true;
+    }
+  }
+
+  // Click the drop zone -> native picker via the Python API.
+  drop.addEventListener("click", function () {
+    if (!window.pywebview) return;
+    window.pywebview.api.pick_file().then(function (path) {
+      if (path) setFile(path);
+    });
+  });
+
+  // Drag and drop. The webview exposes a real filesystem path via file.path.
+  drop.addEventListener("dragover", function (e) {
+    e.preventDefault(); drop.classList.add("over");
+  });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (e) {
+    e.preventDefault(); drop.classList.remove("over");
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && f.path) setFile(f.path);
+  });
+
+  go.addEventListener("click", function () {
+    if (!chosenPath || !window.pywebview) return;
+    resetStatus();
+    statusBox.classList.add("show");
+    go.disabled = true;
+    setStep("extracting");
+    window.pywebview.api.analyze(chosenPath, pw.value || "");
+  });
+
+  function resetStatus() {
+    errorBox.classList.remove("show");
+    errorBox.textContent = "";
+    msg.textContent = "";
+    STEPS.forEach(function (s) {
+      document.getElementById("s-" + s).className = "";
+    });
+  }
+
+  function setStep(current) {
+    var reached = STEPS.indexOf(current);
+    STEPS.forEach(function (s, i) {
+      var li = document.getElementById("s-" + s);
+      if (i < reached) li.className = "done";
+      else if (i === reached) li.className = "active";
+      else li.className = "";
+    });
+  }
+
+  // Called from Python via window.evaluate_js.
+  function onProgress(state, message) {
+    if (state === "error") {
+      statusBox.classList.remove("show");
+      errorBox.textContent = message || "Something went wrong.";
+      errorBox.classList.add("show");
+      go.disabled = false;
+      return;
+    }
+    if (state === "done") {
+      STEPS.forEach(function (s) {
+        document.getElementById("s-" + s).className = "done";
+      });
+      msg.textContent = "Opening your report…";
+      return;  // Python then loads report.html into this window
+    }
+    setStep(state);
+    if (message) msg.textContent = message;
+  }
+</script>
+</body>
+</html>
