@@ -1,0 +1,11 @@
+statements/
+*.pdf
+transactions.csv
+report.html
+digest.md
+merchant_overrides.json
+
+# tooling / environment (not the user's financial data, but no reason to commit)
+.venv/
+__pycache__/
+*.pyc
