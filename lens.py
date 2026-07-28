@@ -64,8 +64,9 @@ def cmd_extract(args, csv_path=None):
 
 
 def _print_balance_health(rows):
-    """Console cash-flow summary per account (uses the balance column)."""
+    """Console cash-flow summary + balance alerts per account."""
     from analysis import balance_health
+    from alerts import balance_alerts
     health = balance_health(rows)
     if len(health) <= 0:
         return
@@ -77,6 +78,13 @@ def _print_balance_health(rows):
               f"-Rs {h['out']:,.0f}; low Rs {h['low_balance']:,.2f} on "
               f"{h['low_date']}, ended Rs {h['end_balance']:,.2f} "
               f"(churn {h['churn']:.1f}x)")
+    _print_alerts(balance_alerts(health))
+
+
+def _print_alerts(alerts):
+    marks = {"high": "!!", "warn": " !", "info": "  ·"}
+    for a in alerts:
+        print(f"  {marks.get(a['level'], '  ·')} {a['msg']}")
 
 
 def _write_csv(rows, out_path):
@@ -94,6 +102,13 @@ def cmd_report(args, reconcile=None):
     out, n = build_report(args.csv, categories, out_path=args.out,
                           reconcile=reconcile, net_transfers=net_transfers)
     print(f"wrote report with {n} transactions -> {out}")
+
+    from alerts import spending_alerts
+    alerts = spending_alerts(load_transactions(args.csv, categories,
+                                               net_transfers=net_transfers))
+    if alerts:
+        print("alerts:")
+        _print_alerts(alerts)
 
     if args.summary:
         txns = load_transactions(args.csv, categories,
