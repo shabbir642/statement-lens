@@ -170,8 +170,14 @@ flowchart LR
 
 ## Test path
 
-`run_tests.py` builds a synthetic HDFC PDF with `make_test_pdf.py`, runs the
-pipeline, and asserts exact-paisa reconciliation, that dropping a row breaks
-reconciliation, correct Income categorisation, the CREDIT/date traps, zero
+`run_tests.py` builds a synthetic **HDFC** PDF (`make_test_pdf.py`) and a
+synthetic **SBI** PDF (`make_sbi_pdf.py` — two accounts, wrapped UPI rows,
+`null`-padded balance lines), runs the pipeline on both, and asserts:
+exact-paisa reconciliation, that dropping a row breaks reconciliation, correct
+Income categorisation, the CREDIT/date traps, the store merge, self-transfer
+netting, the alert rules, the SBI-specific parses (row count, no `null` garbage,
+wrapped narration recovered, two accounts, cross-account reconciliation), zero
 `http` in the report, and — via `render_check.py` in a separate (guard-free)
 process — a headless render with no console errors and every section populated.
+Adding a real bank's redacted layout as another `make_*_pdf.py` fixture keeps a
+fix for one bank from silently regressing another.

@@ -45,6 +45,12 @@ Two stages, deliberately separate, with a CSV checkpoint you review by hand.
 .venv/bin/python lens.py dump statements/mystatement.pdf
 ```
 
+- `--append` merges a statement into the existing `transactions.csv` (re-imports
+  are deduped) so you can build a multi-month history — which is what makes
+  recurring commitments, trends and month-over-month alerts meaningful.
+- `--no-net` disables self-transfer netting (by default, matched debit/credit
+  pairs moved between your own accounts are tagged `Internal Transfer` and kept
+  out of spend/income).
 - `--password SECRET` handles locked statements (banks email them locked).
 - If a PDF has no text layer it is a scan: the tool tells you to run
   `ocrmypdf` first rather than failing silently.
@@ -68,12 +74,13 @@ button that emits JSON to paste straight into this file.
 
 ## Report
 
-Dark UI, inline SVG charts (no chart library). Header stats, a monthly flow
-chart, clickable category bars that filter everything below, per-category
-sparklines, recurring commitments (with a stability score — the share of
-charges within 2% of the median), outliers (large relative to their own
-category via median + 4×MAD), an unrecognised-merchants panel, a searchable
-transaction table, and a month-range filter driving everything.
+Dark UI, inline SVG charts (no chart library). Rule-based **alerts**, header
+stats, a monthly flow chart, an **insights** panel (throughput, concentration,
+counterparties, weekday rhythm), clickable category bars that filter everything
+below, per-category sparklines, recurring commitments (with a stability score —
+the share of charges within 2% of the median), outliers (large relative to
+their own category via median + 4×MAD), an unrecognised-merchants panel, a
+searchable transaction table, and a month-range filter driving everything.
 
 ## Tests
 
