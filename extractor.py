@@ -75,8 +75,10 @@ _SKIP_LINE = re.compile(
     # (average monthly balance), etc.  These carry a date (the account-open
     # date) and a number, so without this they get ingested as a phantom row —
     # and they leak account metadata that never belonged in the txn table.
-    r"a/?c\s+open\s+date|account\s+open(?:ing)?\s+date|expected\s+amb|"
-    r"average\s+monthly\s+bal|\bamb\b\s*[:\-]|"
+    # \s* not \s+: some SBI PDFs render these glued with no spaces, e.g.
+    # "A/COpenDate : ExpectedAMB:" — still a summary header, never a txn.
+    r"a/?c\s*open\s*date|account\s*open(?:ing)?\s*date|expected\s*amb|"
+    r"average\s*monthly\s*bal|\bamb\b\s*[:\-]|"
     # SBI writes empty summary fields as the literal token "null"; such lines
     # (e.g. a garbled "Opening Balance on … : 7501.87 null null null null") are
     # account summaries, never transactions.  No real narration contains "null".
