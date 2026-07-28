@@ -71,6 +71,12 @@ _SKIP_LINE = re.compile(
     r"balance\s+(b/?f|c/?f|brought|carried)|"
     r"multi[- ]?option\s+deposit|total\b.*\binr|statement\s+summary|"
     r"customer\s+care|please\s+do\s+not\s+share|www\.|\.co\.in|page\s+\d+\s+of|"
+    # Account-summary header block (SBI et al.): "A/C Open Date", "Expected AMB"
+    # (average monthly balance), etc.  These carry a date (the account-open
+    # date) and a number, so without this they get ingested as a phantom row —
+    # and they leak account metadata that never belonged in the txn table.
+    r"a/?c\s+open\s+date|account\s+open(?:ing)?\s+date|expected\s+amb|"
+    r"average\s+monthly\s+bal|\bamb\b\s*[:\-]|"
     # SBI writes empty summary fields as the literal token "null"; such lines
     # (e.g. a garbled "Opening Balance on … : 7501.87 null null null null") are
     # account summaries, never transactions.  No real narration contains "null".
@@ -133,6 +139,19 @@ def _find_amounts(text):
 
 def _clean_description(text):
     return re.sub(r"\s+", " ", text).strip(" -\t")
+
+
+def _has_narration(text):
+    """True if ``text`` holds a human-readable word, not just a reference code.
+
+    A payee narration has whole-word tokens ("MOHD", "ANWAR", "SORRY"); a bank
+    reference like ``HDFCH01066840361`` is letters glued to digits — no
+    standalone alphabetic word.  Used to tell a row that describes *who* was
+    paid from one that carries only an IMPS/UPI reference, so the wrapped line
+    holding the payee name / VPA / account is not thrown away.
+    """
+    return any(tok.isalpha() and len(tok) >= 3
+               for tok in re.split(r"[\s/\-]+", text or ""))
 
 
 # --- row model ---------------------------------------------------------------
@@ -210,11 +229,14 @@ def _candidate_rows(lines):
             desc = desc[:a] + " " + desc[b:]
         desc = _clean_description(_DRCR.sub(" ", desc))
 
-        # If this row carries no narration of its own, adopt the wrapped lines.
-        if not re.search(r"[A-Za-z]", desc) and pending:
-            desc = _clean_description(" ".join(pending))
-        elif pending and len(desc) < 4:
-            desc = _clean_description(" ".join(pending) + " " + desc)
+        # Adopt the buffered wrapped line(s) when this row lacks a real
+        # narration of its own — either nothing readable, or just a bank
+        # reference code (an IMPS/UPI ref like HDFCH0106..., no payee).  The
+        # reference alone throws away the payee name / VPA / account that the
+        # wrapped line carries, so we keep both (narration first, then ref).
+        if pending and (not _has_narration(desc) or len(desc) < 4):
+            joined = _clean_description(" ".join(pending))
+            desc = joined if not desc else _clean_description(joined + " " + desc)
         pending = []
 
         rows.append(Row(iso, desc, [v for v, _ in amounts], marker,
