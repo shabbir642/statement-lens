@@ -92,6 +92,17 @@ def main():
     check("report.html has zero 'http' references (offline-safe)",
           "http" not in html, f"grep http -> {html.count('http')} hits")
 
+    # 6. Store merge: re-import is a no-op; distinct same-key rows both survive.
+    import store
+    rec = [{"date": "2026-06-01", "description": "X",
+            "amount": "-100.00", "confidence": "high"}]
+    _, added, skipped = store.merge(rec, rec)
+    check("store: re-importing a statement adds nothing",
+          added == 0 and skipped == 1, f"added={added} skipped={skipped}")
+    _, added2, _ = store.merge([], rec + rec)
+    check("store: two genuine same-key rows both kept", added2 == 2,
+          f"added={added2}")
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)
