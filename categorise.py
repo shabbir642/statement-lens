@@ -164,6 +164,11 @@ def normalise_merchant(description):
     text = _UPI_TAIL.sub(" ", text)
     text = _NONWORD.sub(" ", text)
     tokens = [t for t in text.upper().split() if len(t) > 1]
+    # Long glued merchant names get truncated at different widths by different
+    # systems (e.g. MERCHANT vs MERCHANT), which would
+    # otherwise split one payee into two groups.  Cap each token so the
+    # variants collapse to the same key.
+    tokens = [t[:15] for t in tokens]
     # Keep it short: first handful of meaningful tokens is enough to group by.
     key = " ".join(tokens[:5]).strip()
     return key or (description or "").strip().upper()[:40] or "UNKNOWN"
