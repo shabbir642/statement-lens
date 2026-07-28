@@ -1,6 +1,7 @@
 {
   "Income": [
     "salary",
+    "REMOVED",
     "neft cr",
     "imps cr",
     "int.pd",
@@ -10,6 +11,7 @@
     "dividend",
     "refund",
     "cashback",
+    "cash back",
     "reversal",
     "credited by"
   ],
@@ -157,6 +159,20 @@
     "cgst",
     "sgst",
     "igst"
+  ],
+  "Mandate": [
+    "nach-",
+    "nach ",
+    "ach d-",
+    "ach c-",
+    "ach dr",
+    "ach cr",
+    "e-mandate",
+    "emandate",
+    "enach",
+    "indian clearing corp",
+    "clearing corp",
+    "mandate"
   ],
   "UPI Merchant/QR": [
     "bharatpe",

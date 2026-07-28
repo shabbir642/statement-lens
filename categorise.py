@@ -43,9 +43,9 @@ INCOME_CATEGORY = "Income"
 # accounts most debits are payments, not "transfers", so bare "upi" must NOT
 # live under Transfers Out (that silently mislabels everyday spending).
 DEFAULT_CATEGORIES = {
-    "Income": ["salary", "neft cr", "imps cr", "int.pd", "interest",
+    "Income": ["salary", "REMOVED", "neft cr", "imps cr", "int.pd", "interest",
                "int credit", "interest credit", "dividend", "refund",
-               "cashback", "reversal", "credited by"],
+               "cashback", "cash back", "reversal", "credited by"],
     "Food Delivery": ["swiggy", "zomato", "eatclub", "faasos", "box8"],
     "Groceries": ["blinkit", "zepto", "bigbasket", "big basket", "dmart",
                   "d mart", "grofers", "instamart", "jiomart", "reliance fresh"],
@@ -73,6 +73,12 @@ DEFAULT_CATEGORIES = {
                         "atw", "cwdr"],
     "Fees & Charges": ["service charge", "sms alert", "annual fee", "penalty",
                        "amc", "processing fee", "gst", "cgst", "sgst", "igst"],
+    # NACH/ACH auto-debit mandates that carry no brand of their own (a branded
+    # one — NACH-NETFLIX, ACH … MUTUAL FUND SIP — is claimed by the category
+    # above, since first match wins and those rules come first).
+    "Mandate": ["nach-", "nach ", "ach d-", "ach c-", "ach dr", "ach cr",
+                "e-mandate", "emandate", "enach", "indian clearing corp",
+                "clearing corp", "mandate"],
     # QR / aggregator merchant payments — money spent at a shop, not a transfer.
     "UPI Merchant/QR": ["bharatpe", "paytmqr", "paytm.q", "razorpay", "cashfree",
                         "payu", "billdesk", "ccavenue", "pinelabs", "phonepe.qr",
@@ -135,6 +141,11 @@ def categorise(description, amount, categories):
 
 
 _REF_RE = re.compile(r"\b[\dxX*]{6,}\b")          # long ref / masked card numbers
+# Mixed alphanumeric refs (transaction IDs like 0000SWV7WAFQ, account tails like
+# HDFCH01066840361).  A 6+ char token that contains at least one digit is a
+# reference, never a merchant word — dropping it lets otherwise-identical rows
+# (same payee, different ref) collapse to one key so recurring detection sees them.
+_ALNUM_REF_RE = re.compile(r"\b(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}\b")
 _DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
 _UPI_TAIL = re.compile(r"@[a-z]+", re.I)          # upi handle suffix
 _NONWORD = re.compile(r"[^A-Za-z0-9&/ ]+")
@@ -149,6 +160,7 @@ def normalise_merchant(description):
     text = description or ""
     text = _DATE_RE.sub(" ", text)
     text = _REF_RE.sub(" ", text)
+    text = _ALNUM_REF_RE.sub(" ", text)
     text = _UPI_TAIL.sub(" ", text)
     text = _NONWORD.sub(" ", text)
     tokens = [t for t in text.upper().split() if len(t) > 1]
