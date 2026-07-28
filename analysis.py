@@ -7,10 +7,38 @@ module is what the Markdown digest is built from.
 """
 
 import csv
+import re
 import statistics
 from collections import defaultdict
 
 from categorise import categorise, normalise_merchant
+
+
+# Banking/transaction noise — words that appear in narrations but say nothing
+# about *who* the counterparty is.  Stripped before comparing the two legs of a
+# candidate self-transfer so only identity tokens (names, VPA handles) remain.
+_CP_NOISE = {
+    "upi", "imps", "neft", "rtgs", "ach", "achd", "sbin", "hdfc", "icic",
+    "icici", "axis", "okaxis", "oksbi", "okhdfc", "okicici", "okbizaxis",
+    "ybl", "paytm", "sbi", "bank", "send", "money", "urgent", "sorry",
+    "payment", "transfer", "self", "from", "ref", "refno", "credit", "debit",
+    "cash", "back", "card", "paid", "till", "prev", "rent", "and", "the",
+    "corp", "clearing", "indian", "limited", "private", "india", "pvt", "ltd",
+    "fund", "mutual",
+}
+_CP_TOKEN_RE = re.compile(r"[a-z]{4,}")
+
+
+def _counterparty(description):
+    """Identity tokens (payee names, VPA handles) from a narration.
+
+    Everything in ``_CP_NOISE`` is dropped, as are short tokens, so what's left
+    is who the money went to/came from.  Returns an empty set when nothing
+    identifiable remains (e.g. a bare reference), which the netting guard reads
+    as "unknown" rather than "conflicting".
+    """
+    text = (description or "").lower()
+    return {t for t in _CP_TOKEN_RE.findall(text) if t not in _CP_NOISE}
 
 
 # Categories that are money-neutral — shuffled between your own accounts, not
@@ -57,6 +85,13 @@ def tag_internal_transfers(txns, window_days=3, min_amount=500.0):
     statement often carries both accounts).  Kept conservative — exact amount,
     a floor, a one-to-one greedy match nearest in time — so coincidental equal
     payments are unlikely to be swept up.  Returns the number of pairs tagged.
+
+    Guard: two legs are *not* netted when both name an identifiable
+    counterparty and those counterparties are different people.  Without this,
+    an equal-sized payment received from A and paid to B on the same day (a
+    real income + a real expense) get silently erased as a phantom transfer.
+    When either leg has no identifiable counterparty the amount+date match is
+    trusted as before.
     """
     import datetime
 
@@ -73,6 +108,7 @@ def tag_internal_transfers(txns, window_days=3, min_amount=500.0):
     pairs = 0
     for deb in sorted((t for t in txns if -t["amount"] >= min_amount and d(t)),
                       key=lambda t: t["date"]):
+        cp_deb = _counterparty(deb.get("description"))
         best = None
         for cr in credits:
             if id(cr) in used:
@@ -81,6 +117,11 @@ def tag_internal_transfers(txns, window_days=3, min_amount=500.0):
                 continue
             gap = abs((d(cr) - d(deb)).days)
             if gap > window_days:
+                continue
+            # Different named counterparties on the two legs → not a self
+            # transfer.  Only blocks when both sides are identifiable.
+            cp_cr = _counterparty(cr.get("description"))
+            if cp_deb and cp_cr and cp_deb.isdisjoint(cp_cr):
                 continue
             if best is None or gap < best[0]:
                 best = (gap, cr)
