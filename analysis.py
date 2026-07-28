@@ -169,12 +169,22 @@ def _cadence(gap_days):
     return None, 0
 
 
-def detect_recurring(txns, min_occurrences=3):
-    """Find repeated merchant + stable amount + regular gap.
+def detect_recurring(txns, min_occurrences=4, min_stability=0.7, min_amount=100.0):
+    """Find genuine commitments: same payee, *steady* amount, regular gap.
 
-    Returns a list of dicts with a 'stability' score: the share of occurrences
-    whose amount is within 2% of the median.  We report the score rather than
-    tuning it away — 100% is a real subscription, 40% is coincidence.
+    A commitment (subscription, EMI, rent, mandate) is paid to the same payee,
+    on a schedule, in a similar amount every time.  The last part matters: a
+    shop you visit weekly for random sums is a frequent payee, not a
+    commitment — listing it here just adds noise.  So we require:
+
+    * at least ``min_occurrences`` payments,
+    * a regular gap that lands near a known cadence (see ``_cadence``),
+    * ``stability`` >= ``min_stability`` — the share of payments within 2% of
+      the median amount (1.0 = identical every time), and
+    * a median amount >= ``min_amount`` (skip trivial pings).
+
+    ``stability`` is still returned so the caller can show how fixed each one
+    is.  Loosen ``min_stability`` to surface usage-based bills that drift.
     """
     groups = defaultdict(list)
     for t in txns:
@@ -187,10 +197,12 @@ def detect_recurring(txns, min_occurrences=3):
             continue
         amounts = [abs(t["amount"]) for t in items]
         median_amt = statistics.median(amounts)
-        if median_amt == 0:
+        if median_amt < min_amount:
             continue
         within = sum(1 for a in amounts if abs(a - median_amt) <= 0.02 * median_amt)
         stability = within / len(amounts)
+        if stability < min_stability:      # frequent but variable = not a commitment
+            continue
         gap = _median_gap_days([t["date"] for t in items])
         cadence, annual_mult = _cadence(gap)
         if not cadence:
