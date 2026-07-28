@@ -48,8 +48,17 @@ def cmd_extract(args, csv_path=None):
         print(rc["message"])
         _print_balance_health(rows)
 
-    _write_csv(all_rows, csv_path)
-    print(f"\nwrote {len(all_rows)} rows -> {csv_path}")
+    import store
+    new_records = store.rows_to_records(all_rows)
+    if getattr(args, "append", False):
+        existing = store.read_records(csv_path)
+        merged, added, skipped = store.merge(existing, new_records)
+        store.write_records(merged, csv_path)
+        print(f"\nappended {added} new rows ({skipped} already present) -> "
+              f"{csv_path} now holds {len(merged)} rows")
+    else:
+        store.write_records(new_records, csv_path)
+        print(f"\nwrote {len(new_records)} rows -> {csv_path}")
     print("Review and fix this CSV, then run: report")
     return reconciles
 
@@ -71,13 +80,8 @@ def _print_balance_health(rows):
 
 
 def _write_csv(rows, out_path):
-    with open(out_path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["date", "description", "amount", "confidence"])
-        for r in rows:
-            signed = r.signed if r.signed is not None else 0.0
-            w.writerow([r.date, r.description, f"{signed:.2f}",
-                        r.confidence or "low"])
+    import store
+    store.write_records(store.rows_to_records(rows), out_path)
 
 
 def cmd_report(args, reconcile=None):
@@ -148,6 +152,9 @@ def build_parser():
                        help="PDFs -> transactions.csv")
     e.add_argument("pdfs", nargs="+")
     e.add_argument("--out", default="transactions.csv")
+    e.add_argument("--append", action="store_true",
+                   help="merge into the existing CSV (dedup re-imports) to "
+                        "build a multi-month history")
     e.set_defaults(func=lambda a: cmd_extract(a))
 
     r = sub.add_parser("report", parents=[common], help="CSV -> report.html")
@@ -162,6 +169,8 @@ def build_parser():
     run.add_argument("--out", default="report.html")
     run.add_argument("--csv", default="transactions.csv")
     run.add_argument("--summary", action="store_true")
+    run.add_argument("--append", action="store_true",
+                     help="merge into the existing CSV to build history")
     run.set_defaults(func=cmd_run)
 
     d = sub.add_parser("dump", parents=[common], help="print raw PDF text")
