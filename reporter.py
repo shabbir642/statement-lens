@@ -19,6 +19,7 @@ from categorise import OUTFLOW_ONLY, INCOME_CATEGORY
 def build_report(csv_path, categories, out_path="report.html",
                  reconcile=None, net_transfers=True):
     from analysis import NEUTRAL_CATEGORIES
+    from alerts import spending_alerts
     txns = load_transactions(csv_path, categories, net_transfers=net_transfers)
     payload = {
         "txns": txns,
@@ -26,6 +27,7 @@ def build_report(csv_path, categories, out_path="report.html",
         "outflowOnly": sorted(OUTFLOW_ONLY),
         "incomeCategory": INCOME_CATEGORY,
         "neutral": sorted(NEUTRAL_CATEGORIES),
+        "alerts": spending_alerts(txns),
         "reconcile": reconcile or {},
     }
     data_json = json.dumps(payload, ensure_ascii=False)
@@ -81,6 +83,15 @@ _TEMPLATE = r"""<!doctype html>
   .wkcol { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; }
   .wkcol .bar { width:100%; background:var(--out); border-radius:2px 2px 0 0; min-height:2px; }
   .wkcol .lbl { font-size:9px; color:var(--muted); }
+  .alert { display:flex; gap:8px; align-items:flex-start; padding:7px 10px;
+           border-radius:6px; margin:5px 0; border:1px solid var(--border);
+           background:var(--panel2); font-size:12px; }
+  .alert .ic { flex:0 0 auto; font-weight:700; }
+  .alert.high { border-color:#5a1d1a; background:#2a1210; }
+  .alert.high .ic { color:var(--out); }
+  .alert.warn { border-color:#5c4708; background:#241d08; }
+  .alert.warn .ic { color:var(--low); }
+  .alert.info .ic { color:var(--accent); }
   .reconcile { padding:8px 12px; border-radius:6px; font-size:12px;
                border:1px solid var(--border); }
   .reconcile.ok { color:var(--in); border-color:#1f512b; background:#0f2413; }
@@ -147,6 +158,7 @@ _TEMPLATE = r"""<!doctype html>
 </header>
 <div class="wrap">
   <div class="panel"><div class="stats" id="stats"></div></div>
+  <div class="panel" id="alertspanel"><h2>Alerts</h2><div id="alerts"></div></div>
   <div class="panel"><h2>Monthly flow &mdash; income above, spending below, net line</h2>
     <div id="flow"></div></div>
   <div class="panel"><h2>Insights <span class="muted">(for the selected month range)</span></h2>
@@ -245,6 +257,16 @@ function renderFlow(){
   months.forEach((m,i)=>{ s+=`<circle cx="${x(i)}" cy="${yNet(net[m])}" r="3" fill="var(--net)"><title>${m} net ${fmt(net[m])}</title></circle>`; });
   s+=`</svg>`;
   document.getElementById('flow').innerHTML = s;
+}
+
+// ---- alerts (rule-based, computed in Python, statement-level) --------------
+function renderAlerts(){
+  const a = DATA.alerts || [];
+  const panel = document.getElementById('alertspanel');
+  if(!a.length){ panel.style.display='none'; return; }
+  const ic = {high:'!!', warn:'!', info:'i'};
+  document.getElementById('alerts').innerHTML = a.map(x=>
+    `<div class="alert ${x.level}"><span class="ic">${ic[x.level]||'i'}</span><span>${esc(x.msg)}</span></div>`).join('');
 }
 
 // ---- insights (second-order patterns) -------------------------------------
@@ -480,7 +502,7 @@ function init(){
     out.style.display='block'; out.textContent=j;
     if(navigator.clipboard) navigator.clipboard.writeText(j).catch(()=>{});
   };
-  renderReconcile(); renderAll();
+  renderReconcile(); renderAlerts(); renderAll();
 }
 init();
 </script>

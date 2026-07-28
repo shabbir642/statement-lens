@@ -193,7 +193,8 @@ def spending_insights(txns):
     # Counterparty concentration.
     payees = {}
     for t in debits:
-        payees.setdefault(t["merchant"], []).append(abs(t["amount"]))
+        payees.setdefault(t.get("merchant") or t.get("description", ""),
+                          []).append(abs(t["amount"]))
     distinct = len(payees)
     repeat = sum(1 for v in payees.values() if len(v) >= 2)
     top_merchants = sorted(((m, sum(v), len(v)) for m, v in payees.items()),
@@ -249,6 +250,14 @@ def balance_health(rows):
     if cur:
         accounts.append(cur)
 
+    import datetime
+
+    def _d(s):
+        try:
+            return datetime.date.fromisoformat(s)
+        except (ValueError, TypeError):
+            return None
+
     out = []
     for a in accounts:
         bals = [(r.date, r.balance) for r in a if r.balance is not None]
@@ -258,10 +267,20 @@ def balance_health(rows):
         end = bals[-1][1]
         ins = sum(r.signed for r in a if r.signed and r.signed > 0)
         outs = sum(-r.signed for r in a if r.signed and r.signed < 0)
+        debits = [r for r in a if r.signed and r.signed < 0]
+        big = min(debits, key=lambda r: r.signed) if debits else None
+        # Timing risk: did the balance run low shortly BEFORE a big debit?
+        low_before_big = False
+        if big and _d(low[0]) and _d(big.date):
+            days = (_d(big.date) - _d(low[0])).days
+            low_before_big = (0 <= days <= 7 and low[1] < -big.signed)
         out.append({"txns": len(a), "low_date": low[0], "low_balance": low[1],
                     "end_balance": end, "in": ins, "out": outs,
                     "throughput": ins + outs,
-                    "churn": (ins + outs) / max(end, 1)})
+                    "churn": (ins + outs) / max(end, 1),
+                    "big_debit_amt": (-big.signed if big else 0),
+                    "big_debit_date": (big.date if big else None),
+                    "low_before_big": low_before_big})
     return out
 
 

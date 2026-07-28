@@ -88,6 +88,17 @@ def write_digest(txns, path="digest.md"):
                      f"counted as spend or income).")
     lines.append("")
 
+    # --- rule-based alerts ---
+    from alerts import spending_alerts
+    al = spending_alerts(txns)
+    if al:
+        lines.append("## Alerts")
+        lines.append("")
+        marks = {"high": "**(!)**", "warn": "(!)", "info": "(i)"}
+        for a in al:
+            lines.append(f"- {marks.get(a['level'], '(i)')} {a['msg']}")
+        lines.append("")
+
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     return path

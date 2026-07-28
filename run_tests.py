@@ -115,6 +115,22 @@ def main():
           pairs == 1 and tt[0]["internal"] and tt[1]["internal"]
           and not tt[2]["internal"], f"pairs={pairs}")
 
+    # 8. Alerts: net-negative fires; balance timing-risk fires as 'high'.
+    from alerts import spending_alerts, balance_alerts
+    sa = spending_alerts([
+        {"date": "2026-01-01", "month": "2026-01", "amount": -10000.0,
+         "category": "UPI Payment", "confidence": "high", "internal": False},
+        {"date": "2026-01-02", "month": "2026-01", "amount": 100.0,
+         "category": "Income", "confidence": "high", "internal": False},
+    ])
+    check("alerts: net-negative alert fires",
+          any("Net negative" in a["msg"] for a in sa))
+    ba = balance_alerts([{"low_balance": 800, "low_date": "2026-01-05",
+                          "big_debit_amt": 20000, "big_debit_date": "2026-01-08",
+                          "low_before_big": True, "churn": 3}])
+    check("alerts: low-balance-before-big-debit is a high alert",
+          any(a["level"] == "high" for a in ba))
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)
