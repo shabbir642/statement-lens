@@ -131,12 +131,41 @@ def main():
     check("alerts: low-balance-before-big-debit is a high alert",
           any(a["level"] == "high" for a in ba))
 
+    # 9. Per-bank golden test: synthetic SBI layout (two accounts, wrapped
+    #    rows, null-padded balance lines) must parse cleanly.
+    test_sbi_layout(categories)
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
+
+
+def test_sbi_layout(categories):
+    """Golden test for the SBI-specific messes (regression guard)."""
+    import make_sbi_pdf
+    from analysis import balance_health
+    exp = make_sbi_pdf.generate()
+    res = extract_pdf(exp["path"])
+    rows = res["rows"]
+
+    check("SBI: row count matches (no wrapped rows lost, no null garbage)",
+          len(rows) == exp["total"], f"parsed {len(rows)} of {exp['total']}")
+    check("SBI: no balance-summary/null line ingested as a transaction",
+          all("null" not in (r.description or "").lower()
+              and "oupllening" not in (r.description or "").lower()
+              for r in rows),
+          "clean" if rows else "no rows")
+    check("SBI: wrapped narration recovered (not dropped)",
+          any(exp["wrap_token"] in (r.description or "").lower() for r in rows),
+          f"looked for '{exp['wrap_token']}'")
+    check("SBI: both accounts detected",
+          len(balance_health(rows)) == 2,
+          f"{len(balance_health(rows))} accounts")
+    check("SBI: reconciles across accounts and pages",
+          res["reconcile"]["ok"] is True, res["reconcile"]["message"])
 
 
 def render_headlessly(report_path):

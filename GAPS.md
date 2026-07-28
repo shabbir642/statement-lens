@@ -40,6 +40,20 @@ was wrong, what is now fixed, and what still doesn't work.
 6. **Personal data on screen.** `dump` printed name, address, account number,
    PAN, email. → New `redact.py`; `dump` redacts by default.
 
+## Since addressed (follow-up work)
+
+- **Single-statement horizon.** → `--append` builds a multi-month store
+  (`store.py`), deduping re-imports by multiplicity, so recurring/trends/
+  month-over-month have data to work with.
+- **Inter-account transfers double-counted.** → matched debit/credit pairs are
+  netted as `Internal Transfer` and excluded from spend/income (`--no-net` off).
+- **Metrics but no advice.** → `alerts.py` emits deterministic warnings (low
+  balance before a big debit, concentration, net-negative, month-over-month
+  spikes, …) in the console, report, and digest.
+- **One layout tested.** → a synthetic SBI fixture (`make_sbi_pdf.py`) joins the
+  HDFC one as a golden regression test, so a fix for one bank can't silently
+  break another.
+
 ## Still weak (limitations, not bugs)
 
 - **Person-to-person UPI can't be auto-categorised.** Payments to individuals
