@@ -43,7 +43,7 @@ INCOME_CATEGORY = "Income"
 # accounts most debits are payments, not "transfers", so bare "upi" must NOT
 # live under Transfers Out (that silently mislabels everyday spending).
 DEFAULT_CATEGORIES = {
-    "Income": ["salary", "REMOVED", "neft cr", "imps cr", "int.pd", "interest",
+    "Income": ["salary", "neft cr", "imps cr", "int.pd", "interest",
                "int credit", "interest credit", "dividend", "refund",
                "cashback", "cash back", "reversal", "credited by"],
     "Food Delivery": ["swiggy", "zomato", "eatclub", "faasos", "box8"],
@@ -165,9 +165,9 @@ def normalise_merchant(description):
     text = _NONWORD.sub(" ", text)
     tokens = [t for t in text.upper().split() if len(t) > 1]
     # Long glued merchant names get truncated at different widths by different
-    # systems (e.g. MERCHANT vs MERCHANT), which would
-    # otherwise split one payee into two groups.  Cap each token so the
-    # variants collapse to the same key.
+    # systems (e.g. the same 19-char name arriving once as 19 chars and once
+    # clipped to 18), which would otherwise split one payee into two groups.
+    # Cap each token so the variants collapse to the same key.
     tokens = [t[:15] for t in tokens]
     # Keep it short: first handful of meaningful tokens is enough to group by.
     key = " ".join(tokens[:5]).strip()
