@@ -103,6 +103,18 @@ def main():
     check("store: two genuine same-key rows both kept", added2 == 2,
           f"added={added2}")
 
+    # 7. Self-transfer netting: matched debit+credit pair tagged, small ones left.
+    from analysis import tag_internal_transfers
+    tt = [
+        {"date": "2026-03-01", "amount": -5000.0, "internal": False},
+        {"date": "2026-03-02", "amount": 5000.0, "internal": False},
+        {"date": "2026-03-01", "amount": -50.0, "internal": False},  # below floor
+    ]
+    pairs = tag_internal_transfers(tt)
+    check("self-transfer netting matches a debit+credit pair",
+          pairs == 1 and tt[0]["internal"] and tt[1]["internal"]
+          and not tt[2]["internal"], f"pairs={pairs}")
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)

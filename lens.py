@@ -90,12 +90,14 @@ def cmd_report(args, reconcile=None):
     from digest import write_digest
 
     categories = _load_categories()
+    net_transfers = not getattr(args, "no_net", False)
     out, n = build_report(args.csv, categories, out_path=args.out,
-                          reconcile=reconcile)
+                          reconcile=reconcile, net_transfers=net_transfers)
     print(f"wrote report with {n} transactions -> {out}")
 
     if args.summary:
-        txns = load_transactions(args.csv, categories)
+        txns = load_transactions(args.csv, categories,
+                                 net_transfers=net_transfers)
         path = write_digest(txns)
         print(f"wrote anonymised digest -> {path}")
     return out
@@ -162,6 +164,8 @@ def build_parser():
     r.add_argument("--out", default="report.html")
     r.add_argument("--summary", action="store_true",
                    help="also write anonymised digest.md")
+    r.add_argument("--no-net", action="store_true",
+                   help="do not net matched self-transfers between accounts")
     r.set_defaults(func=lambda a: cmd_report(a))
 
     run = sub.add_parser("run", parents=[common], help="extract then report")
@@ -171,6 +175,8 @@ def build_parser():
     run.add_argument("--summary", action="store_true")
     run.add_argument("--append", action="store_true",
                      help="merge into the existing CSV to build history")
+    run.add_argument("--no-net", action="store_true",
+                     help="do not net matched self-transfers between accounts")
     run.set_defaults(func=cmd_run)
 
     d = sub.add_parser("dump", parents=[common], help="print raw PDF text")

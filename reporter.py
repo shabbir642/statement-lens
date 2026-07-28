@@ -17,13 +17,15 @@ from categorise import OUTFLOW_ONLY, INCOME_CATEGORY
 
 
 def build_report(csv_path, categories, out_path="report.html",
-                 reconcile=None):
-    txns = load_transactions(csv_path, categories)
+                 reconcile=None, net_transfers=True):
+    from analysis import NEUTRAL_CATEGORIES
+    txns = load_transactions(csv_path, categories, net_transfers=net_transfers)
     payload = {
         "txns": txns,
         "categories": list(categories.keys()),
         "outflowOnly": sorted(OUTFLOW_ONLY),
         "incomeCategory": INCOME_CATEGORY,
+        "neutral": sorted(NEUTRAL_CATEGORIES),
         "reconcile": reconcile or {},
     }
     data_json = json.dumps(payload, ensure_ascii=False)
@@ -187,6 +189,9 @@ const overrides = {};   // merchant -> chosen category (unrecognised panel)
 function inRange(t){ const i = MONTHS.indexOf(t.month);
   return i >= state.from && i <= state.to; }
 function monthFiltered(){ return T.filter(inRange); }
+// real() drops money-neutral internal transfers, so spend/income/flow/insights
+// reflect actual money in and out, not shuffles between your own accounts.
+function real(arr){ return arr.filter(t => !t.internal); }
 function belowFiltered(){                 // month + category filter
   return monthFiltered().filter(t => !state.category || t.category === state.category);
 }
@@ -195,7 +200,7 @@ function nMonths(){ return Math.max(1, state.to - state.from + 1); }
 
 // ---- header stats ---------------------------------------------------------
 function renderStats(){
-  const rows = monthFiltered();
+  const rows = real(monthFiltered());
   let income=0, spend=0;
   for(const t of rows){ if(t.amount>0) income+=t.amount; else spend+=t.amount; }
   const n = nMonths();
@@ -215,7 +220,7 @@ function renderFlow(){
   const months = activeMonths();
   const inc = {}, out = {}, net = {};
   for(const m of months){ inc[m]=0; out[m]=0; }
-  for(const t of monthFiltered()){
+  for(const t of real(monthFiltered())){
     if(t.amount>0) inc[t.month]+=t.amount; else out[t.month]+=Math.abs(t.amount);
   }
   months.forEach(m => net[m] = inc[m]-out[m]);
@@ -244,7 +249,7 @@ function renderFlow(){
 
 // ---- insights (second-order patterns) -------------------------------------
 function renderInsights(){
-  const rows = monthFiltered();
+  const rows = real(monthFiltered());
   const debits = rows.filter(t=>t.amount<0);
   const credits = rows.filter(t=>t.amount>0);
   const outs = debits.map(t=>Math.abs(t.amount)).sort((a,b)=>b-a);
@@ -271,6 +276,8 @@ function renderInsights(){
   const wkMax = Math.max(1, ...Object.values(wd));
   const order=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
+  const internal = monthFiltered().filter(t=>t.internal && t.amount<0);
+  const internalTot = internal.reduce((s,t)=>s+Math.abs(t.amount),0);
   const chips = [
     ['Throughput', fmt(grossIn+grossOut), `in ${fmt(grossIn)} / out ${fmt(grossOut)}`],
     ['Concentration', pareto(3)+'%', `top 3 debits of outflow · top 10 = ${pareto(10)}%`],
@@ -278,6 +285,7 @@ function renderInsights(){
     ['Biggest day', bigDay?fmt(bigDay[1]):'—', bigDay?bigDay[0]:''],
     ['Round-number debits', String(round100.length), `${fmt(round100.reduce((s,a)=>s+a,0))} · often person-to-person`],
     ['Autopay/verify pings', String(pings), '≤ Rs 2 · mandate checks'],
+    ['Internal transfers', internal.length?fmt(internalTot):'—', `${internal.length} pairs netted out of spend/income`],
   ];
   let html = '<div class="chips">' + chips.map(([k,v,s])=>
     `<div class="chip"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join('') + '</div>';
@@ -292,7 +300,7 @@ function renderInsights(){
 // ---- category breakdown (clickable) ---------------------------------------
 function categorySpend(){
   const map = {};
-  for(const t of monthFiltered()) if(t.amount<0){
+  for(const t of real(monthFiltered())) if(t.amount<0){
     map[t.category]=(map[t.category]||0)+Math.abs(t.amount); }
   return Object.entries(map).sort((a,b)=>b[1]-a[1]);
 }
@@ -316,7 +324,7 @@ function renderCats(){
 // ---- per-category sparklines ----------------------------------------------
 function sparkFor(cat, months){
   const vals = months.map(m => {
-    let s=0; for(const t of T) if(t.category===cat && t.month===m && t.amount<0) s+=Math.abs(t.amount);
+    let s=0; for(const t of T) if(t.category===cat && t.month===m && t.amount<0 && !t.internal) s+=Math.abs(t.amount);
     return s; });
   const max = Math.max(1, ...vals);
   const W=160,H=28;
@@ -343,7 +351,7 @@ function cadence(gap){
   return null;
 }
 function recurringList(){
-  const rows = belowFiltered().filter(t=>t.amount<0);
+  const rows = belowFiltered().filter(t=>t.amount<0 && !t.internal);
   const g={}; for(const t of rows){ (g[t.merchant]=g[t.merchant]||[]).push(t); }
   const out=[];
   for(const [m,items] of Object.entries(g)){
@@ -376,7 +384,7 @@ function renderRecurring(){
 
 // ---- outliers -------------------------------------------------------------
 function renderOutliers(){
-  const rows=belowFiltered().filter(t=>t.amount<0);
+  const rows=belowFiltered().filter(t=>t.amount<0 && !t.internal);
   const byCat={}; for(const t of rows) (byCat[t.category]=byCat[t.category]||[]).push(t);
   const flagged=[];
   for(const [c,items] of Object.entries(byCat)){
@@ -428,8 +436,9 @@ function renderTable(){
     .sort((a,b)=> a.date<b.date?1:-1);
   const body=rows.map(t=>{
     const low = t.confidence==='low';
+    const cat = esc(t.category) + (t.internal?' <span class="tag">internal</span>':'');
     return `<tr class="${low?'low':''}"><td class="num">${t.date}</td>
-      <td>${esc(t.description)}</td><td>${esc(t.category)}</td>
+      <td>${esc(t.description)}</td><td>${cat}</td>
       <td class="n ${t.amount<0?'neg':'pos'}">${fmt2(t.amount)}</td>
       <td><span class="tag ${low?'low':''}">${t.confidence||''}</span></td></tr>`;
   }).join('');
