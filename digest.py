@@ -80,6 +80,12 @@ def write_digest(txns, path="digest.md"):
     busiest = max(wk.items(), key=lambda x: x[1][1])
     lines.append(f"- **Busiest weekday by spend:** {busiest[0]} "
                  f"(Rs {busiest[1][1]:,.0f}).")
+    internal = [t for t in txns if t.get("internal") and t["amount"] < 0]
+    if internal:
+        tot = sum(abs(t["amount"]) for t in internal)
+        lines.append(f"- **Internal transfers netted out:** {len(internal)} "
+                     f"pairs, Rs {tot:,.0f} moved between own accounts (not "
+                     f"counted as spend or income).")
     lines.append("")
 
     with open(path, "w", encoding="utf-8") as fh:

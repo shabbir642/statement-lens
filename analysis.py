@@ -13,8 +13,17 @@ from collections import defaultdict
 from categorise import categorise, normalise_merchant
 
 
-def load_transactions(csv_path, categories):
-    """Read the reviewed CSV and attach category + merchant to each row."""
+# Categories that are money-neutral — shuffled between your own accounts, not
+# spent or earned.  Excluded from spend/income/flow so they don't inflate them.
+NEUTRAL_CATEGORIES = {"Internal Transfer"}
+
+
+def load_transactions(csv_path, categories, net_transfers=True):
+    """Read the reviewed CSV and attach category + merchant to each row.
+
+    When ``net_transfers`` is on, matched debit/credit pairs that look like
+    money moved between your own accounts are retagged ``Internal Transfer``.
+    """
     txns = []
     with open(csv_path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
@@ -33,8 +42,55 @@ def load_transactions(csv_path, categories):
                 "category": cat,
                 "matched": kw,
                 "merchant": normalise_merchant(desc),
+                "internal": False,
             })
+    if net_transfers:
+        tag_internal_transfers(txns)
     return txns
+
+
+def tag_internal_transfers(txns, window_days=3, min_amount=500.0):
+    """Retag matched debit+credit pairs as ``Internal Transfer``.
+
+    Heuristic: an outflow and an inflow of the *same* amount within a few days
+    are almost always the two legs of a transfer between your own accounts (the
+    statement often carries both accounts).  Kept conservative — exact amount,
+    a floor, a one-to-one greedy match nearest in time — so coincidental equal
+    payments are unlikely to be swept up.  Returns the number of pairs tagged.
+    """
+    import datetime
+
+    def d(t):
+        try:
+            return datetime.date.fromisoformat(t["date"])
+        except (ValueError, TypeError):
+            return None
+
+    credits = sorted((t for t in txns
+                      if t["amount"] >= min_amount and d(t)),
+                     key=lambda t: t["date"])
+    used = set()
+    pairs = 0
+    for deb in sorted((t for t in txns if -t["amount"] >= min_amount and d(t)),
+                      key=lambda t: t["date"]):
+        best = None
+        for cr in credits:
+            if id(cr) in used:
+                continue
+            if abs(cr["amount"] - (-deb["amount"])) > 0.01:
+                continue
+            gap = abs((d(cr) - d(deb)).days)
+            if gap > window_days:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, cr)
+        if best:
+            cr = best[1]
+            used.add(id(cr))
+            deb["category"] = cr["category"] = "Internal Transfer"
+            deb["internal"] = cr["internal"] = True
+            pairs += 1
+    return pairs
 
 
 def monthly_category_totals(txns):
@@ -81,7 +137,7 @@ def detect_recurring(txns, min_occurrences=3):
     """
     groups = defaultdict(list)
     for t in txns:
-        if t["amount"] < 0:                       # commitments are outflows
+        if t["amount"] < 0 and not t.get("internal"):   # commitments are outflows
             groups[t["merchant"]].append(t)
 
     out = []
@@ -121,6 +177,7 @@ def spending_insights(txns):
     digest and report can present the same numbers.
     """
     import datetime
+    txns = [t for t in txns if not t.get("internal")]   # exclude self-transfers
     debits = [t for t in txns if t["amount"] < 0]
     credits = [t for t in txns if t["amount"] > 0]
     outs = sorted((abs(t["amount"]) for t in debits), reverse=True)
@@ -216,7 +273,7 @@ def detect_outliers(txns, mad_k=4.0):
     """
     by_cat = defaultdict(list)
     for t in txns:
-        if t["amount"] < 0:
+        if t["amount"] < 0 and not t.get("internal"):
             by_cat[t["category"]].append(t)
     flagged = []
     for cat, items in by_cat.items():
