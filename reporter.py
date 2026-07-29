@@ -79,6 +79,9 @@ _TEMPLATE = r"""<!doctype html>
              letter-spacing:.06em; }
   .chip .v { font-size:16px; margin-top:4px; font-variant-numeric:tabular-nums; }
   .chip .s { color:var(--muted); font-size:10px; margin-top:2px; }
+  .info { cursor:help; opacity:.5; font-size:10px; margin-left:2px;
+          font-style:normal; }
+  .info:hover { opacity:.9; }
   .wkbar { display:flex; gap:4px; align-items:flex-end; height:40px; margin-top:6px; }
   .wkcol { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; }
   .wkcol .bar { width:100%; background:var(--out); border-radius:2px 2px 0 0; min-height:2px; }
@@ -166,10 +169,12 @@ _TEMPLATE = r"""<!doctype html>
   <div class="panel"><h2>Category breakdown <span class="muted">(click to filter everything below)</span></h2>
     <div id="cats"></div></div>
   <div class="panel"><h2>Category trends</h2><div id="sparks"></div></div>
-  <div class="panel"><h2>Recurring commitments</h2>
-    <div class="muted" style="margin-bottom:8px">Stability = share of charges within 2% of the median. 100% is a real subscription; a low score is coincidence, shown not tuned away.</div>
+  <div class="panel"><h2>Recurring commitments
+      <span class="info" title="Payments that repeat like clockwork — same payee, similar amount, regular gap (weekly/monthly/etc.). These are your fixed obligations: subscriptions, EMIs, rent, mandates. A shop you visit often for random amounts is NOT shown here — only steady, same-amount payments count as a commitment.">&#9432;</span></h2>
+    <div class="muted" style="margin-bottom:8px">Your fixed, scheduled payments. <b>Same-amount</b> = how often the amount stayed within 2% of the usual (100% = identical every time). <b>Annualised</b> = what it adds up to over a year.</div>
     <div id="recurring"></div></div>
-  <div class="panel"><h2>Outliers <span class="muted">(large relative to their own category: median + 4&times;MAD)</span></h2>
+  <div class="panel"><h2>Outliers <span class="muted">(unusually large for their category)</span>
+      <span class="info" title="A single payment that is much bigger than your normal spend in that same category — median + 4×MAD (MAD = typical distance from the median). It is not necessarily wrong, just worth a look: a big one-off, a mistake, or something unexpected. It compares each payment to its OWN category, so a normal large rent does not flag but a huge grocery bill would.">&#9432;</span></h2>
     <div id="outliers"></div></div>
   <div class="panel"><h2>Unrecognised merchants</h2>
     <div class="muted" style="margin-bottom:8px">Pick a category per merchant, then copy the rules to paste into categories.json.</div>
@@ -300,20 +305,33 @@ function renderInsights(){
 
   const internal = monthFiltered().filter(t=>t.internal && t.amount<0);
   const internalTot = internal.reduce((s,t)=>s+Math.abs(t.amount),0);
+  // Plain-English definition shown on hover for each insight.
+  const defs = {
+    'Money moved': 'Everything that came in plus everything that went out. A big number here next to a small balance means money mostly passes straight through the account.',
+    'Spending concentration': 'How much of your spending sits in just a few big payments. "Top 3 = 60%" means three payments made up 60% of all the money that went out.',
+    'People & merchants paid': 'How many different payees you sent money to. "Paid more than once" counts the ones you paid repeatedly — usually regulars or subscriptions.',
+    'Biggest day': 'The single day the most money went out, adding up everything spent that day.',
+    'Round-number payments': 'Payments in exact round amounts like 5,000 or 10,000 — often money sent to a person rather than spent at a shop.',
+    'Tiny autopay pings': 'Charges of Rs 2 or less. Usually a bank quietly checking that an auto-pay mandate is still active — worth confirming which are yours.',
+    'Internal transfers': 'Money you moved between your own accounts. Set aside so it does not get counted as spending or income.',
+    'Spend by weekday': 'Which days of the week your money tends to go out.',
+    'Top counterparties by outflow': 'The payees you sent the most money to over the selected months.',
+  };
+  const info = k => defs[k] ? ` <span class="info" title="${esc(defs[k])}">&#9432;</span>` : '';
   const chips = [
-    ['Throughput', fmt(grossIn+grossOut), `in ${fmt(grossIn)} / out ${fmt(grossOut)}`],
-    ['Concentration', pareto(3)+'%', `top 3 debits of outflow · top 10 = ${pareto(10)}%`],
-    ['Counterparties', String(distinct), `${repeat} seen more than once`],
+    ['Money moved', fmt(grossIn+grossOut), `in ${fmt(grossIn)} · out ${fmt(grossOut)}`],
+    ['Spending concentration', 'top 3 = '+pareto(3)+'%', `top 10 = ${pareto(10)}% of all money out`],
+    ['People & merchants paid', String(distinct), `${repeat} paid more than once`],
     ['Biggest day', bigDay?fmt(bigDay[1]):'—', bigDay?bigDay[0]:''],
-    ['Round-number debits', String(round100.length), `${fmt(round100.reduce((s,a)=>s+a,0))} · often person-to-person`],
-    ['Autopay/verify pings', String(pings), '≤ Rs 2 · mandate checks'],
-    ['Internal transfers', internal.length?fmt(internalTot):'—', `${internal.length} pairs netted out of spend/income`],
+    ['Round-number payments', String(round100.length), `${fmt(round100.reduce((s,a)=>s+a,0))} in round amounts`],
+    ['Tiny autopay pings', String(pings), 'Rs 2 or less'],
+    ['Internal transfers', internal.length?fmt(internalTot):'—', `${internal.length} pairs set aside`],
   ];
   let html = '<div class="chips">' + chips.map(([k,v,s])=>
-    `<div class="chip"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join('') + '</div>';
-  html += '<div class="chip" style="margin-bottom:12px"><div class="k">Spend by weekday</div><div class="wkbar">' +
+    `<div class="chip"><div class="k">${esc(k)}${info(k)}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join('') + '</div>';
+  html += '<div class="chip" style="margin-bottom:12px"><div class="k">Spend by weekday'+info('Spend by weekday')+'</div><div class="wkbar">' +
     order.map(d=>`<div class="wkcol"><div class="bar" style="height:${wd[d]/wkMax*32}px" title="${d} ${fmt(wd[d])}"></div><div class="lbl">${d[0]}</div></div>`).join('') + '</div></div>';
-  html += '<div class="k" style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin:4px 0">Top counterparties by outflow</div>';
+  html += '<div class="k" style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin:4px 0">Top counterparties by outflow'+info('Top counterparties by outflow')+'</div>';
   html += topMerch.map(([m,tot,n])=>
     `<div class="spark"><div class="name" style="flex:1">${esc(m)}</div><div class="amt">${fmt(tot)} <span class="muted">×${n}</span></div></div>`).join('');
   document.getElementById('insights').innerHTML = html;
@@ -377,16 +395,20 @@ function recurringList(){
   const g={}; for(const t of rows){ (g[t.merchant]=g[t.merchant]||[]).push(t); }
   const out=[];
   for(const [m,items] of Object.entries(g)){
-    if(items.length<3) continue;
+    if(items.length<4) continue;
     const amts=items.map(t=>Math.abs(t.amount)); const med=median(amts);
-    if(med===0) continue;
+    // A commitment is a *steady* amount on a schedule; a frequent payee with
+    // random sums is not one. Require a real amount and mostly-stable sums.
+    if(med<100) continue;
     const within=amts.filter(a=>Math.abs(a-med)<=0.02*med).length;
+    const stability=within/items.length;
+    if(stability<0.7) continue;
     const dates=items.map(t=>t.date).filter(Boolean).sort();
     if(dates.length<2) continue;
     const gaps=[]; for(let i=1;i<dates.length;i++) gaps.push(daysBetween(dates[i-1],dates[i]));
     const cad=cadence(median(gaps)); if(!cad) continue;
     out.push({merchant:m, category:items[0].category, occ:items.length,
-      median:med, stability:within/items.length, cadence:cad.name,
+      median:med, stability, cadence:cad.name,
       annualised:med*cad.mult});
   }
   return out.sort((a,b)=>b.annualised-a.annualised);
@@ -416,12 +438,16 @@ function renderOutliers(){
     for(const t of items) if(Math.abs(t.amount)>thr) flagged.push({...t,thr,med});
   }
   flagged.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
+  const shown = flagged.slice(0, 25);
+  const note = flagged.length > shown.length
+    ? `<div class="muted" style="margin-top:6px">Showing the ${shown.length} largest of ${flagged.length}. A long list usually means a broad bucket like “UPI Payment” is mixing tiny and huge payments — add rules in categories.json to sharpen it.</div>`
+    : '';
   document.getElementById('outliers').innerHTML = flagged.length ?
     `<table><tr><th>Date</th><th>Description</th><th>Category</th>
       <th class="n">Amount</th><th class="n">Cat median</th></tr>` +
-    flagged.map(t=>`<tr><td class="num">${t.date}</td><td>${esc(t.description)}</td>
+    shown.map(t=>`<tr><td class="num">${t.date}</td><td>${esc(t.description)}</td>
       <td>${esc(t.category)}</td><td class="n neg">${fmt2(Math.abs(t.amount))}</td>
-      <td class="n muted">${fmt2(t.med)}</td></tr>`).join('')+`</table>`
+      <td class="n muted">${fmt2(t.med)}</td></tr>`).join('')+`</table>`+note
     : '<div class="muted">No outliers in range.</div>';
 }
 

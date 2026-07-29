@@ -7,8 +7,10 @@ Run: .venv/bin/python run_tests.py
 import offline_guard  # noqa: F401  — prove the pipeline runs with sockets blocked
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 
 import make_test_pdf
 from extractor import extract_pdf, reconcile
@@ -17,6 +19,10 @@ from reporter import build_report
 from analysis import load_transactions
 
 RESULTS = []
+
+# Scratch dir for test artefacts (CSV + HTML), so a run never touches the
+# repo's real transactions.csv / report.html.  Removed on exit.
+TMPDIR = tempfile.mkdtemp(prefix="lens-test-")
 
 
 def check(name, ok, detail=""):
@@ -83,9 +89,14 @@ def main():
           "HDFC MUTUAL FUND" in m and " D " not in f" {m} ", f"-> '{m}'")
 
     # 5. Build the report and check offline-safety + populated sections.
+    #    Write to a throwaway temp dir, never the repo's own transactions.csv /
+    #    report.html — those hold the user's real, gitignored, unrecoverable
+    #    financial history, and a test run must never clobber them.
     from lens import _write_csv
-    _write_csv(rows, "transactions.csv")
-    out, n = build_report("transactions.csv", categories,
+    test_csv = os.path.join(TMPDIR, "transactions.csv")
+    test_report = os.path.join(TMPDIR, "report.html")
+    _write_csv(rows, test_csv)
+    out, n = build_report(test_csv, categories, out_path=test_report,
                           reconcile=res["reconcile"])
     with open(out, encoding="utf-8") as fh:
         html = fh.read()
@@ -141,6 +152,11 @@ def main():
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
+
+
+def _cleanup():
+    import shutil
+    shutil.rmtree(TMPDIR, ignore_errors=True)
 
 
 def test_sbi_layout(categories):
@@ -200,4 +216,8 @@ def render_headlessly(report_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    finally:
+        _cleanup()
+    sys.exit(code)
