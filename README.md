@@ -7,9 +7,11 @@ can verify by hand.
 
 ## Guarantees
 
-- **Offline, enforced not promised.** Before any work, `offline_guard` replaces
-  `socket.socket`, `socket.create_connection` and `socket.getaddrinfo` with
-  functions that raise. If a dependency ever phones home, the tool crashes.
+- **Offline, enforced not promised.** Before any work, `offline_guard` confines
+  networking to loopback: any `connect`, `create_connection` or DNS lookup for a
+  non-loopback address raises. If a dependency ever tries to phone home, the tool
+  crashes. (Local `127.0.0.1` sockets are allowed only so the desktop app's
+  webview can grab a free port — nothing can leave the machine.)
 - **Self-contained report.** `report.html` has zero external references — no
   CDN, no web fonts, no analytics. Verify: `grep http report.html` → nothing.
 - **Reconciliation.** If the statement has a balance column, the sum of every
@@ -57,6 +59,34 @@ Two stages, deliberately separate, with a CSV checkpoint you review by hand.
 - `--summary` writes `digest.md`: category totals per month plus recurring
   commitments, with merchant names, dates, reference numbers and account
   details stripped — safe to paste into an external tool.
+
+## Desktop app (Windows)
+
+For non-technical users there is a double-click app — no Python, no terminal.
+It wraps the exact pipeline above in a native window: drop a statement PDF, type
+the password, watch the progress, and the report opens in the same window. It is
+still fully offline — the window is a WebView2 view driven over the OS's native
+bridge, not a local server, so [offline_guard.py](offline_guard.py) stays in
+force (a local server would trip its `socket` block).
+
+- **Install:** run `StatementLens-Setup.exe` and launch **Statement Lens** from
+  the Start Menu. The installer adds the WebView2 runtime if it is missing.
+- **Build:** the exe can only be built on Windows (PyInstaller does not
+  cross-compile). Push a `v*` tag and the [build-windows](.github/workflows/build-windows.yml)
+  GitHub Action produces `StatementLens.exe` and `StatementLens-Setup.exe`, or
+  build locally on Windows:
+
+  ```bash
+  pip install -r requirements-app.txt
+  pyinstaller statement-lens.spec        # -> dist/StatementLens.exe
+  iscc installer/statement-lens.iss      # -> installer/Output/StatementLens-Setup.exe
+  ```
+
+- **Run from source** (any OS, for development): `pip install pywebview` then
+  `python app.py`.
+- Outputs (`report.html`, `transactions.csv`, `digest.md`) are written to
+  `%LOCALAPPDATA%\StatementLens` so they work even when the app is installed to
+  a read-only location.
 
 ## CSV format
 
