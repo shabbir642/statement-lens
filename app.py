@@ -88,9 +88,9 @@ class Api:
         """Open a native file picker; return the chosen statement path, or ''."""
         result = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False,
-            file_types=("Statement files (*.pdf;*.csv)",
+            file_types=("Statement files (*.pdf;*.csv;*.xlsx)",
                         "PDF files (*.pdf)", "CSV files (*.csv)",
-                        "All files (*.*)"))
+                        "Excel files (*.xlsx)", "All files (*.*)"))
         if not result:
             return ""
         return result[0]

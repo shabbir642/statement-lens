@@ -1,6 +1,8 @@
 # Plan: accept CSV / Excel statements (Phase 1)
 
-Status: **planned, not implemented.** Parked here so it survives context loss.
+Status: **1a (CSV) and 1b (XLSX) implemented** in `tabular_source.py`; **1c
+(legacy .xls) not done** — the reader rejects `.xls` with "re-save as .xlsx or
+CSV". Rest of this doc kept as the original design reference / for 1c.
 Sibling doc: `DEFERRED_FEATURES.md` (data-purge). Image/OCR support is a separate,
 higher-risk Phase 2 — deliberately out of scope here.
 

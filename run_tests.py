@@ -212,6 +212,50 @@ def test_tabular_csv():
           and r3["rows"][0].confidence == "high",
           f"{[(x.date, x.signed) for x in r3['rows']]}")
 
+    test_tabular_xlsx()
+
+
+def test_tabular_xlsx():
+    """XLSX ingest: skip a cover sheet, parse typed/serial/string dates, and
+    reconcile — mirroring the CSV path via the same shared core."""
+    try:
+        import openpyxl
+    except ImportError:
+        check("XLSX: openpyxl available", None,
+              "SKIPPED — pip install openpyxl to enable the Excel path")
+        return
+    import datetime
+    from extractor import extract
+
+    path = os.path.join(TMPDIR, "bank.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["My Bank - Account Statement"])          # preamble
+    ws.append([])
+    ws.append(["Txn Date", "Narration", "Debit", "Credit", "Balance"])
+    ws.append([datetime.datetime(2024, 6, 2), "UPI-ZOMATO", 1200.00, None, 48800.00])
+    ws.append([45448, "NEFT-SALARY", None, 50000.00, 98800.00])   # serial date
+    ws.append(["09/06/2024", "ATM-WDL", "5,000.00", None, "93,800.00"])
+    ws.append(["Total", None, None, None, None])         # trailer
+    cover = wb.create_sheet("Cover")
+    cover.append(["Statement summary"])
+    wb.move_sheet("Cover", -(len(wb.sheetnames) - 1))    # cover first — must be skipped
+    wb.save(path)
+
+    res = extract(path)
+    rows = res["rows"]
+    dates = [r.date for r in rows]
+    signed = {r.description: r.signed for r in rows}
+    check("XLSX: cover sheet skipped, 3 txns from the real sheet",
+          len(rows) == 3, f"parsed {len(rows)}: {dates}")
+    check("XLSX: typed, serial and string dates all parse",
+          dates == ["2024-06-02", "2024-06-05", "2024-06-09"], f"{dates}")
+    check("XLSX: Dr/Cr split signs correctly and reconciles",
+          signed.get("UPI-ZOMATO") == -1200.0
+          and signed.get("NEFT-SALARY") == 50000.0
+          and res["reconcile"]["ok"] is True,
+          res["reconcile"]["message"])
+
 
 def test_sbi_layout(categories):
     """Golden test for the SBI-specific messes (regression guard)."""

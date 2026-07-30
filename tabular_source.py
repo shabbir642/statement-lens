@@ -11,8 +11,9 @@ into an ``extractor.Row``) with a thin per-format reader in front of it.  The
 resulting rows flow through the exact same pipeline as PDF output — including
 ``extractor.reconcile`` when a balance column is present.
 
-Phase 1a implements the CSV reader (stdlib, no new dependency) and the shared
-core.  XLSX/XLS readers slot into ``_read_matrix`` later (see CSV_XLS_Plan.md).
+CSV (stdlib) and XLSX (openpyxl) are supported; legacy ``.xls`` is not (re-save
+as ``.xlsx`` or CSV).  New formats slot in as another reader behind
+``_read_matrix`` — the shared core is untouched (see CSV_XLS_Plan.md).
 """
 
 import os
@@ -143,10 +144,16 @@ def _parse_amount(value):
 
 
 def _parse_date_cell(value):
-    """ISO date string from a cell (str/date/datetime), or '' if unparseable."""
+    """ISO date string from a cell (str/date/datetime/Excel serial), or ''."""
     import datetime
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.strftime("%Y-%m-%d")
+    # Excel sometimes stores a date column as a raw serial number. Convert only
+    # values in a plausible date range (~1954–2064) so a stray amount isn't
+    # mistaken for a date. Excel's epoch is 1899-12-30 (its 1900 leap-year bug).
+    if isinstance(value, (int, float)) and 20000 <= value <= 60000:
+        return (datetime.date(1899, 12, 30)
+                + datetime.timedelta(days=int(value))).isoformat()
     s = str(value or "").strip()
     if not s:
         return ""
@@ -245,14 +252,52 @@ def _read_csv(path):
     return [list(r) for r in csv.reader(io.StringIO(raw), dialect)]
 
 
+def _read_xlsx(path):
+    """XLSX -> matrix of cells (typed: datetime/number/str kept as-is).
+
+    A workbook may hold the table on any sheet (or split accounts across
+    sheets); we pick the first sheet whose rows contain a detectable header, so
+    a cover/summary sheet doesn't shadow the real one.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise TabularParseError(
+            "Reading .xlsx needs the 'openpyxl' package (pip install openpyxl), "
+            "or export the statement as CSV instead.")
+    # read_only streams large sheets; data_only returns computed values, not
+    # formula text.
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        best = None
+        for ws in wb.worksheets:
+            matrix = [list(row) for row in ws.iter_rows(values_only=True)]
+            matrix = [r for r in matrix if any(c is not None and str(c).strip()
+                                               for c in r)]
+            try:
+                _find_header(matrix)
+            except TabularParseError:
+                continue
+            best = matrix
+            break
+        if best is None:
+            raise TabularParseError(
+                "No sheet in this workbook has a recognisable statement table "
+                "(a Date column next to a Debit/Credit or Amount column).")
+        return best
+    finally:
+        wb.close()
+
+
 def _read_matrix(path):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         return _read_csv(path)
-    if ext in (".xlsx", ".xls"):
+    if ext == ".xlsx":
+        return _read_xlsx(path)
+    if ext == ".xls":
         raise TabularParseError(
-            "Excel (%s) isn't supported yet — export the statement as CSV for now "
-            "(Phase 1b adds .xlsx)." % ext)
+            "Legacy .xls isn't supported — re-save it as .xlsx or CSV.")
     raise TabularParseError("Unsupported file type: %s" % ext)
 
 
