@@ -26,6 +26,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-app.txt
 
+      - name: Audit dependencies for known vulnerabilities
+        # Fails the build if any installed dependency has a known advisory
+        # (OSV / PyPI). Keeps the shipped bundle free of flagged versions.
+        run: |
+          pip install pip-audit
+          pip-audit --desc
+
       - name: Build StatementLens.exe (PyInstaller)
         run: pyinstaller --noconfirm statement-lens.spec
 
