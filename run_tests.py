@@ -146,6 +146,9 @@ def main():
     #    rows, null-padded balance lines) must parse cleanly.
     test_sbi_layout(categories)
 
+    # 10. Tabular ingest: CSV statements map columns and reconcile like PDFs.
+    test_tabular_csv()
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)
@@ -157,6 +160,135 @@ def main():
 def _cleanup():
     import shutil
     shutil.rmtree(TMPDIR, ignore_errors=True)
+
+
+def test_tabular_csv():
+    """CSV ingest: detect columns past a preamble, sign Dr/Cr, reconcile, and
+    pass our own reviewed-CSV schema through untouched."""
+    from extractor import extract
+
+    # A realistic bank export: preamble rows, Dr/Cr split, a balance column, a
+    # trailing summary row — none of which should become transactions.
+    bank = os.path.join(TMPDIR, "bank.csv")
+    with open(bank, "w", encoding="utf-8") as fh:
+        fh.write("Account Statement for A/C 001234567890\n\n")
+        fh.write("Txn Date,Value Date,Narration,Cheque No,"
+                 "Withdrawal (Dr),Deposit (Cr),Closing Balance\n")
+        fh.write('02/06/2024,02/06/2024,UPI-ZOMATO-ORDER,,"1,200.00",,"48,800.00"\n')
+        fh.write('05/06/2024,05/06/2024,NEFT-ACME-SALARY,,,"50,000.00","98,800.00"\n')
+        fh.write('09/06/2024,09/06/2024,ATM-CASH WDL,,"5,000.00",,"93,800.00"\n')
+        fh.write('30/06/2024,,Closing Balance,,,,"93,800.00"\n')
+    res = extract(bank)
+    rows = res["rows"]
+    signed = {r.description: r.signed for r in rows}
+    check("CSV: header found past preamble, summary row dropped (3 txns)",
+          len(rows) == 3, f"parsed {len(rows)}")
+    check("CSV: Dr/Cr split becomes signed amounts",
+          signed.get("UPI-ZOMATO-ORDER") == -1200.0
+          and signed.get("NEFT-ACME-SALARY") == 50000.0,
+          f"{signed}")
+    check("CSV: reconciles against the balance column",
+          res["reconcile"]["ok"] is True, res["reconcile"]["message"])
+
+    # No balance column -> exact amounts, but reconciliation is skipped (not a
+    # failure), and the message says so.
+    nobal = os.path.join(TMPDIR, "nobal.csv")
+    with open(nobal, "w", encoding="utf-8") as fh:
+        fh.write("Date;Description;Amount\n01-07-2024;Netflix;-199.00\n")
+    r2 = extract(nobal)
+    check("CSV: no-balance file parses (semicolon), reconciliation skipped",
+          r2["reconcile"]["ok"] is None and len(r2["rows"]) == 1
+          and r2["rows"][0].signed == -199.0,
+          r2["reconcile"]["message"][:50])
+
+    # Our own reviewed CSV schema is passed through verbatim (no re-detection).
+    intern = os.path.join(TMPDIR, "reviewed.csv")
+    with open(intern, "w", encoding="utf-8") as fh:
+        fh.write("date,description,amount,confidence\n"
+                 "2026-07-07,SALARY,181684.00,high\n")
+    r3 = extract(intern)
+    check("CSV: our reviewed-CSV schema passes through unchanged",
+          len(r3["rows"]) == 1 and r3["rows"][0].signed == 181684.0
+          and r3["rows"][0].confidence == "high",
+          f"{[(x.date, x.signed) for x in r3['rows']]}")
+
+    # Bare "Dr"/"Cr" column headers (some banks) must be recognised, while a
+    # column like "Address" (contains the substring "dr") must NOT be.
+    from tabular_source import _classify
+    check("CSV: bare 'Dr'/'Cr' headers classify; 'Address'/'Order' do not",
+          _classify("Dr") == "debit" and _classify("Cr") == "credit"
+          and _classify("Dr (₹)") == "debit"
+          and _classify("Address") is None and _classify("Order No") is None,
+          f"Dr={_classify('Dr')} Cr={_classify('Cr')} Address={_classify('Address')}")
+    bare = os.path.join(TMPDIR, "bare.csv")
+    with open(bare, "w", encoding="utf-8") as fh:
+        fh.write("Date,Particulars,Dr,Cr,Balance\n")
+        fh.write("02/06/2024,SHOP,300.00,,700.00\n")
+        fh.write("03/06/2024,REFUND,,500.00,1200.00\n")
+    rb = extract(bare)
+    sb = {r.description: r.signed for r in rb["rows"]}
+    check("CSV: bare Dr/Cr columns sign correctly and reconcile",
+          sb.get("SHOP") == -300.0 and sb.get("REFUND") == 500.0
+          and rb["reconcile"]["ok"] is True, f"{sb} {rb['reconcile']['ok']}")
+
+    test_tabular_xlsx()
+
+
+def test_tabular_xlsx():
+    """XLSX ingest: skip a cover sheet, parse typed/serial/string dates, and
+    reconcile — mirroring the CSV path via the same shared core."""
+    try:
+        import openpyxl
+    except ImportError:
+        check("XLSX: openpyxl available", None,
+              "SKIPPED — pip install openpyxl to enable the Excel path")
+        return
+    import datetime
+    from extractor import extract
+
+    path = os.path.join(TMPDIR, "bank.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["My Bank - Account Statement"])          # preamble
+    ws.append([])
+    ws.append(["Txn Date", "Narration", "Debit", "Credit", "Balance"])
+    ws.append([datetime.datetime(2024, 6, 2), "UPI-ZOMATO", 1200.00, None, 48800.00])
+    ws.append([45448, "NEFT-SALARY", None, 50000.00, 98800.00])   # serial date
+    ws.append(["09/06/2024", "ATM-WDL", "5,000.00", None, "93,800.00"])
+    ws.append(["Total", None, None, None, None])         # trailer
+    cover = wb.create_sheet("Cover")
+    cover.append(["Statement summary"])
+    wb.move_sheet("Cover", -(len(wb.sheetnames) - 1))    # cover first — must be skipped
+    wb.save(path)
+
+    res = extract(path)
+    rows = res["rows"]
+    dates = [r.date for r in rows]
+    signed = {r.description: r.signed for r in rows}
+    check("XLSX: cover sheet skipped, 3 txns from the real sheet",
+          len(rows) == 3, f"parsed {len(rows)}: {dates}")
+    check("XLSX: typed, serial and string dates all parse",
+          dates == ["2024-06-02", "2024-06-05", "2024-06-09"], f"{dates}")
+    check("XLSX: Dr/Cr split signs correctly and reconciles",
+          signed.get("UPI-ZOMATO") == -1200.0
+          and signed.get("NEFT-SALARY") == 50000.0
+          and res["reconcile"]["ok"] is True,
+          res["reconcile"]["message"])
+
+    # A file renamed to .xlsx that isn't a real workbook must fail with a clear
+    # message, not a raw BadZipFile/openpyxl traceback.
+    from tabular_source import TabularParseError
+    fake = os.path.join(TMPDIR, "fake.xlsx")
+    with open(fake, "w", encoding="utf-8") as fh:
+        fh.write("Date,Description,Amount\n01-07-2024,X,-1.00\n")  # really CSV
+    try:
+        extract(fake)
+        ok = False
+    except TabularParseError:
+        ok = True
+    except Exception:
+        ok = False
+    check("XLSX: a mislabeled/invalid .xlsx fails with a clear message", ok)
 
 
 def test_sbi_layout(categories):

@@ -83,3 +83,34 @@ was wrong, what is now fixed, and what still doesn't work.
   from the running balance. If a statement has no balance column at all, the
   first row of each section falls back to Dr/Cr markers, then keywords, and is
   marked lower confidence.
+
+## CSV / Excel ingest (`tabular_source.py`)
+
+CSV and XLSX statements go through a shared column-detection core. The numbers
+are exact (never inferred), so the trust model is stronger than the PDF path —
+reconciliation still runs when a balance column is present, otherwise the report
+says totals are exact-but-unverified. Current limitations:
+
+- **Number format is en-IN / en-US only.** Amounts are cleaned to digits, `.`
+  and `-`, so comma-thousands + period-decimal (incl. Indian lakh grouping,
+  `1,23,456.00`) parse correctly, but a European `1.234,56` (comma-decimal)
+  would be mis-read. No locale detection.
+
+- **One account per file assumed.** Only the first data row is marked a new
+  section, so a CSV/sheet that concatenates two accounts (the running balance
+  jumps at the seam) will show reconciliation mismatches. Multiple *sheets* are
+  scanned only to find the one real table, not merged as separate accounts.
+
+- **Header detection can fail on unusual layouts — by design it fails loudly.**
+  It needs a Date column beside a Debit/Credit or Amount column within the first
+  25 rows. Bare `Dr`/`Cr` headers are handled; a column named only `Amount` with
+  no balance is handled (unverified). A genuinely unrecognisable layout raises a
+  clear "couldn't find the columns" error rather than guessing.
+
+- **Date strings: dash-ISO and `dd/mm/yy` only.** `2024-06-05`, `05/06/2024`,
+  `05-Jun-2024` and real Excel date/serial cells parse; `2024/06/05`
+  (slash-ISO) does not. Numeric `dd/mm` order is assumed (same as the PDF path).
+
+- **Legacy `.xls` is not read.** Only `.xlsx` (via `openpyxl`); re-save an old
+  `.xls` as `.xlsx` or export CSV. Password-protected `.xlsx` is decrypted with
+  the supplied password (`msoffcrypto-tool`).
