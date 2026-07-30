@@ -42,13 +42,17 @@ def _classify(header_cell):
     h = _norm(header_cell)
     if not h:
         return None
+    # Letters-only form, so a header that is *just* the marker — "Dr", "Dr.",
+    # "Dr (₹)" — is recognised, without a substring "dr" inside "Address"/"Order"
+    # ever matching.
+    alpha = re.sub(r"[^a-z]", "", h)
     if "date" in h:
         return "date"
-    if any(w in h for w in ("withdrawal", "debit", "paid out", "dr amt",
-                            "dr amount", "withdrawal amt")):
+    if alpha == "dr" or any(w in h for w in ("withdrawal", "debit", "paid out",
+                            "dr amt", "dr amount", "withdrawal amt")):
         return "debit"
-    if any(w in h for w in ("deposit", "credit", "paid in", "cr amt",
-                            "cr amount", "deposit amt")):
+    if alpha == "cr" or any(w in h for w in ("deposit", "credit", "paid in",
+                            "cr amt", "cr amount", "deposit amt")):
         return "credit"
     if "balance" in h:
         return "balance"

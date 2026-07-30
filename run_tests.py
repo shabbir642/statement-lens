@@ -212,6 +212,25 @@ def test_tabular_csv():
           and r3["rows"][0].confidence == "high",
           f"{[(x.date, x.signed) for x in r3['rows']]}")
 
+    # Bare "Dr"/"Cr" column headers (some banks) must be recognised, while a
+    # column like "Address" (contains the substring "dr") must NOT be.
+    from tabular_source import _classify
+    check("CSV: bare 'Dr'/'Cr' headers classify; 'Address'/'Order' do not",
+          _classify("Dr") == "debit" and _classify("Cr") == "credit"
+          and _classify("Dr (₹)") == "debit"
+          and _classify("Address") is None and _classify("Order No") is None,
+          f"Dr={_classify('Dr')} Cr={_classify('Cr')} Address={_classify('Address')}")
+    bare = os.path.join(TMPDIR, "bare.csv")
+    with open(bare, "w", encoding="utf-8") as fh:
+        fh.write("Date,Particulars,Dr,Cr,Balance\n")
+        fh.write("02/06/2024,SHOP,300.00,,700.00\n")
+        fh.write("03/06/2024,REFUND,,500.00,1200.00\n")
+    rb = extract(bare)
+    sb = {r.description: r.signed for r in rb["rows"]}
+    check("CSV: bare Dr/Cr columns sign correctly and reconcile",
+          sb.get("SHOP") == -300.0 and sb.get("REFUND") == 500.0
+          and rb["reconcile"]["ok"] is True, f"{sb} {rb['reconcile']['ok']}")
+
     test_tabular_xlsx()
 
 
