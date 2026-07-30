@@ -85,10 +85,12 @@ class Api:
         self._window = window
 
     def pick_file(self):
-        """Open a native file picker; return the chosen PDF path, or ''."""
+        """Open a native file picker; return the chosen statement path, or ''."""
         result = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False,
-            file_types=("PDF files (*.pdf)", "All files (*.*)"))
+            file_types=("Statement files (*.pdf;*.csv;*.xlsx)",
+                        "PDF files (*.pdf)", "CSV files (*.csv)",
+                        "Excel files (*.xlsx)", "All files (*.*)"))
         if not result:
             return ""
         return result[0]
@@ -126,7 +128,7 @@ class Api:
             raise FileNotFoundError("Please choose a statement PDF first.")
 
         # Imported late, after offline_guard is installed (same order as lens.py).
-        from extractor import extract_pdf
+        from extractor import extract
         from reporter import build_report
         from digest import write_digest
         from analysis import load_transactions
@@ -140,7 +142,7 @@ class Api:
 
         self._progress("extracting", "Reading the statement…")
         categories = ensure_categories_file(cats_path)
-        res = extract_pdf(pdf_path, password=password)
+        res = extract(pdf_path, password=password)
         _write_csv(res["rows"], csv_path)
 
         self._progress("analysing", "Categorising transactions…")
@@ -170,6 +172,7 @@ def _self_check():
     assert os.path.isfile(ui), "bundled ui/upload.html missing: %s" % ui
     # Import the whole pipeline the same way _pipeline() does.
     import extractor, reporter, digest, analysis, categorise, lens  # noqa: F401
+    import tabular_source  # noqa: F401 — CSV/Excel reader must be in the bundle
     assert hasattr(extractor, "extract_pdf")
     assert hasattr(reporter, "build_report")
     # offline_guard must block outbound internet while allowing loopback
