@@ -9,6 +9,8 @@ pywebview>=5.0
 
 # Reading .xlsx statements (pure-Python, offline-safe). CSV needs no dependency.
 openpyxl>=3.1
+# Decrypt password-protected .xlsx (banks often email these). Offline-safe.
+msoffcrypto-tool>=5.0
 
 # Windows only: the .NET bridge pywebview uses for the WebView2 backend.
 # (No-op / not installed on macOS, where the Cocoa backend is used instead.)

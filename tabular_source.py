@@ -252,12 +252,52 @@ def _read_csv(path):
     return [list(r) for r in csv.reader(io.StringIO(raw), dialect)]
 
 
-def _read_xlsx(path):
+def _decrypt_office(path, password):
+    """Decrypt a password-protected Office file (OLE2 wrapper) -> BytesIO.
+
+    Banks often email password-protected .xlsx; Excel stores those as an
+    encrypted OLE2 (CDFV2) container, not a zip, so openpyxl can't read them
+    until we decrypt.  Returns a BytesIO of the inner workbook.
+    """
+    try:
+        import msoffcrypto
+    except ImportError:
+        raise TabularParseError(
+            "This Excel file is password-protected; reading it needs the "
+            "'msoffcrypto-tool' package — or open it in Excel, remove the "
+            "password, and re-save.")
+    if not password:
+        raise TabularParseError(
+            "This Excel file is password-protected — re-run with the password "
+            "(the desktop app has a password box; the CLI takes --password).")
+    import io
+    buf = io.BytesIO()
+    try:
+        with open(path, "rb") as fh:
+            office = msoffcrypto.OfficeFile(fh)
+            office.load_key(password=password)
+            office.decrypt(buf)
+    except TabularParseError:
+        raise
+    except Exception:
+        raise TabularParseError(
+            "Couldn't open the Excel file — the password looks incorrect.")
+    buf.seek(0)
+    if buf.read(4) != b"PK\x03\x04":          # decrypted content isn't a zip/xlsx
+        raise TabularParseError(
+            "This looks like a legacy or unusual Excel file — re-save it as "
+            ".xlsx or export as CSV.")
+    buf.seek(0)
+    return buf
+
+
+def _read_xlsx(path, password=None):
     """XLSX -> matrix of cells (typed: datetime/number/str kept as-is).
 
     A workbook may hold the table on any sheet (or split accounts across
     sheets); we pick the first sheet whose rows contain a detectable header, so
-    a cover/summary sheet doesn't shadow the real one.
+    a cover/summary sheet doesn't shadow the real one.  Password-protected
+    workbooks are decrypted first (see ``_decrypt_office``).
     """
     try:
         import openpyxl
@@ -265,9 +305,20 @@ def _read_xlsx(path):
         raise TabularParseError(
             "Reading .xlsx needs the 'openpyxl' package (pip install openpyxl), "
             "or export the statement as CSV instead.")
+    with open(path, "rb") as fh:
+        magic = fh.read(4)
+    if magic == b"PK\x03\x04":
+        source = path                         # plain, unprotected .xlsx
+    elif magic == b"\xd0\xcf\x11\xe0":        # OLE2 -> encrypted (or legacy) Office
+        source = _decrypt_office(path, password)
+    else:
+        raise TabularParseError(
+            "This .xlsx isn't a valid Excel file (its contents don't match the "
+            "format). It may be an HTML or CSV export renamed to .xlsx — try "
+            "opening it in Excel and re-saving, or export as CSV.")
     # read_only streams large sheets; data_only returns computed values, not
     # formula text.
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
     try:
         best = None
         for ws in wb.worksheets:
@@ -289,12 +340,12 @@ def _read_xlsx(path):
         wb.close()
 
 
-def _read_matrix(path):
+def _read_matrix(path, password=None):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         return _read_csv(path)
     if ext == ".xlsx":
-        return _read_xlsx(path)
+        return _read_xlsx(path, password)
     if ext == ".xls":
         raise TabularParseError(
             "Legacy .xls isn't supported — re-save it as .xlsx or CSV.")
@@ -303,12 +354,13 @@ def _read_matrix(path):
 
 # --- public API --------------------------------------------------------------
 
-def extract_tabular(path):
+def extract_tabular(path, password=None):
     """Parse a CSV/Excel statement into the same dict shape as ``extract_pdf``.
 
-    Keys: rows, opening, closing, reconcile, has_text.
+    Keys: rows, opening, closing, reconcile, has_text.  ``password`` is used
+    only for password-protected Excel files.
     """
-    matrix = _read_matrix(path)
+    matrix = _read_matrix(path, password)
     matrix = [r for r in matrix if r]             # drop wholly empty lines
 
     # Our own reviewed checkpoint? Pass it through untouched.

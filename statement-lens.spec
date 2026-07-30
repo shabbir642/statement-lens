@@ -15,7 +15,8 @@ from PyInstaller.utils.hooks import collect_all
 # Bundle the webview backends and the PDF stack with their data files, so the
 # frozen exe has everything it needs with no site-packages present.
 datas, binaries, hiddenimports = [], [], []
-for pkg in ("webview", "pdfplumber", "pdfminer", "openpyxl"):
+for pkg in ("webview", "pdfplumber", "pdfminer", "openpyxl",
+            "msoffcrypto", "olefile"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

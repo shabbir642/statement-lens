@@ -256,6 +256,21 @@ def test_tabular_xlsx():
           and res["reconcile"]["ok"] is True,
           res["reconcile"]["message"])
 
+    # A file renamed to .xlsx that isn't a real workbook must fail with a clear
+    # message, not a raw BadZipFile/openpyxl traceback.
+    from tabular_source import TabularParseError
+    fake = os.path.join(TMPDIR, "fake.xlsx")
+    with open(fake, "w", encoding="utf-8") as fh:
+        fh.write("Date,Description,Amount\n01-07-2024,X,-1.00\n")  # really CSV
+    try:
+        extract(fake)
+        ok = False
+    except TabularParseError:
+        ok = True
+    except Exception:
+        ok = False
+    check("XLSX: a mislabeled/invalid .xlsx fails with a clear message", ok)
+
 
 def test_sbi_layout(categories):
     """Golden test for the SBI-specific messes (regression guard)."""

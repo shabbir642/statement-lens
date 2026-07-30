@@ -480,7 +480,7 @@ def extract(path, password=None):
     ext = os.path.splitext(path)[1].lower()
     if ext in (".csv", ".xlsx", ".xls"):
         import tabular_source
-        return tabular_source.extract_tabular(path)
+        return tabular_source.extract_tabular(path, password=password)
     return extract_pdf(path, password=password)
 
 

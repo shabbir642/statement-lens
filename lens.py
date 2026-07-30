@@ -26,6 +26,7 @@ def _load_categories():
 
 def cmd_extract(args, csv_path=None):
     from extractor import extract, NoTextLayer
+    from tabular_source import TabularParseError
     _load_categories()  # ensure the starter file exists on first run
     csv_path = csv_path or args.out
 
@@ -38,6 +39,10 @@ def cmd_extract(args, csv_path=None):
         except NoTextLayer as e:
             print(str(e), file=sys.stderr)
             reconciles.append({"ok": None, "message": "no text layer"})
+            continue
+        except TabularParseError as e:
+            print(f"could not read {pdf_path}: {e}", file=sys.stderr)
+            reconciles.append({"ok": None, "message": str(e)})
             continue
         rows = res["rows"]
         all_rows.extend(rows)
@@ -149,7 +154,6 @@ def cmd_dump(args):
     if redact:
         print("\n[identity fields redacted; pass --no-redact for the raw text "
               "on your own machine]")
-
 
 def build_parser():
     # A shared parent so --password is accepted both before AND after the
