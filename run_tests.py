@@ -146,6 +146,9 @@ def main():
     #    rows, null-padded balance lines) must parse cleanly.
     test_sbi_layout(categories)
 
+    # 10. Tabular ingest: CSV statements map columns and reconcile like PDFs.
+    test_tabular_csv()
+
     render_headlessly(out)
 
     print("\n" + "=" * 60)
@@ -157,6 +160,57 @@ def main():
 def _cleanup():
     import shutil
     shutil.rmtree(TMPDIR, ignore_errors=True)
+
+
+def test_tabular_csv():
+    """CSV ingest: detect columns past a preamble, sign Dr/Cr, reconcile, and
+    pass our own reviewed-CSV schema through untouched."""
+    from extractor import extract
+
+    # A realistic bank export: preamble rows, Dr/Cr split, a balance column, a
+    # trailing summary row — none of which should become transactions.
+    bank = os.path.join(TMPDIR, "bank.csv")
+    with open(bank, "w", encoding="utf-8") as fh:
+        fh.write("Account Statement for A/C 001234567890\n\n")
+        fh.write("Txn Date,Value Date,Narration,Cheque No,"
+                 "Withdrawal (Dr),Deposit (Cr),Closing Balance\n")
+        fh.write('02/06/2024,02/06/2024,UPI-ZOMATO-ORDER,,"1,200.00",,"48,800.00"\n')
+        fh.write('05/06/2024,05/06/2024,NEFT-ACME-SALARY,,,"50,000.00","98,800.00"\n')
+        fh.write('09/06/2024,09/06/2024,ATM-CASH WDL,,"5,000.00",,"93,800.00"\n')
+        fh.write('30/06/2024,,Closing Balance,,,,"93,800.00"\n')
+    res = extract(bank)
+    rows = res["rows"]
+    signed = {r.description: r.signed for r in rows}
+    check("CSV: header found past preamble, summary row dropped (3 txns)",
+          len(rows) == 3, f"parsed {len(rows)}")
+    check("CSV: Dr/Cr split becomes signed amounts",
+          signed.get("UPI-ZOMATO-ORDER") == -1200.0
+          and signed.get("NEFT-ACME-SALARY") == 50000.0,
+          f"{signed}")
+    check("CSV: reconciles against the balance column",
+          res["reconcile"]["ok"] is True, res["reconcile"]["message"])
+
+    # No balance column -> exact amounts, but reconciliation is skipped (not a
+    # failure), and the message says so.
+    nobal = os.path.join(TMPDIR, "nobal.csv")
+    with open(nobal, "w", encoding="utf-8") as fh:
+        fh.write("Date;Description;Amount\n01-07-2024;Netflix;-199.00\n")
+    r2 = extract(nobal)
+    check("CSV: no-balance file parses (semicolon), reconciliation skipped",
+          r2["reconcile"]["ok"] is None and len(r2["rows"]) == 1
+          and r2["rows"][0].signed == -199.0,
+          r2["reconcile"]["message"][:50])
+
+    # Our own reviewed CSV schema is passed through verbatim (no re-detection).
+    intern = os.path.join(TMPDIR, "reviewed.csv")
+    with open(intern, "w", encoding="utf-8") as fh:
+        fh.write("date,description,amount,confidence\n"
+                 "2026-07-07,SALARY,181684.00,high\n")
+    r3 = extract(intern)
+    check("CSV: our reviewed-CSV schema passes through unchanged",
+          len(r3["rows"]) == 1 and r3["rows"][0].signed == 181684.0
+          and r3["rows"][0].confidence == "high",
+          f"{[(x.date, x.signed) for x in r3['rows']]}")
 
 
 def test_sbi_layout(categories):

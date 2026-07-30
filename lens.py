@@ -25,7 +25,7 @@ def _load_categories():
 
 
 def cmd_extract(args, csv_path=None):
-    from extractor import extract_pdf, NoTextLayer
+    from extractor import extract, NoTextLayer
     _load_categories()  # ensure the starter file exists on first run
     csv_path = csv_path or args.out
 
@@ -34,7 +34,7 @@ def cmd_extract(args, csv_path=None):
     for pdf_path in args.pdfs:
         print(f"\n== {pdf_path} ==")
         try:
-            res = extract_pdf(pdf_path, password=args.password)
+            res = extract(pdf_path, password=args.password)
         except NoTextLayer as e:
             print(str(e), file=sys.stderr)
             reconciles.append({"ok": None, "message": "no text layer"})

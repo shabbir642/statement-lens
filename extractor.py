@@ -16,6 +16,7 @@ Three traps handled up front (see the task notes):
    end-to-end movement, or we say so.
 """
 
+import os
 import re
 
 # --- regexes -----------------------------------------------------------------
@@ -467,6 +468,20 @@ def extract_pdf(pdf_path, password=None):
         },
         "has_text": True,
     }
+
+
+def extract(path, password=None):
+    """Parse any supported statement into rows + reconcile, by file type.
+
+    PDF goes through the text-layout parser; CSV/Excel go through the tabular
+    reader.  Both return the same dict shape (rows, opening, closing, reconcile,
+    has_text) so the rest of the pipeline doesn't care which format it was.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".csv", ".xlsx", ".xls"):
+        import tabular_source
+        return tabular_source.extract_tabular(path)
+    return extract_pdf(path, password=password)
 
 
 class NoTextLayer(Exception):
